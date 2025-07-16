@@ -1,0 +1,8 @@
+# Required for process_data_job.py in preprocessing
+rasterio
+geopandas
+shapely
+numpy
+scikit-learn
+tqdm
+pandas

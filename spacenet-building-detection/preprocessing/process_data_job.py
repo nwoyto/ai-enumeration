@@ -1,4 +1,17 @@
 # preprocessing/process_data_job.py
+import subprocess
+import sys
+
+def install(package):
+    subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+
+# List your dependencies here
+for pkg in ["rasterio", "geopandas", "shapely", "tqdm", "scikit-learn", "pandas"]:
+    try:
+        __import__(pkg)
+    except ImportError:
+        install(pkg)
+
 import os
 import tarfile
 from pathlib import Path

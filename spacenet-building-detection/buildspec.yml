@@ -1,0 +1,29 @@
+version: 0.2
+
+env:
+  variables:
+    AWS_REGION: "us-east-1"
+    IMAGE_REPO_NAME: "spacenet-geoprocessing"
+    IMAGE_TAG: "latest"
+    ACCOUNT_ID: "040571275415"
+
+phases:
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      - aws --version
+      - $(aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com)
+      - REPOSITORY_URI=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$IMAGE_REPO_NAME
+      - echo $REPOSITORY_URI
+  build:
+    commands:
+      - echo Building the Docker image...
+      - docker build -t $IMAGE_REPO_NAME:latest .
+      - docker tag $IMAGE_REPO_NAME:latest $REPOSITORY_URI:$IMAGE_TAG
+  post_build:
+    commands:
+      - echo Pushing the Docker image...
+      - docker push $REPOSITORY_URI:$IMAGE_TAG
+      - echo "Image pushed to $REPOSITORY_URI:$IMAGE_TAG"
+artifacts:
+  files: []
