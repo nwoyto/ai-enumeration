@@ -1,0 +1,23 @@
+name: spacenet-building-detection
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.9
+  - numpy
+  - pandas
+  - rasterio
+  - geopandas
+  - fiona
+  - shapely
+  - tqdm
+  - scikit-learn
+  - pillow=9.5.0
+  - pip
+  - pip:
+      - torch
+      - torchvision
+      - timm
+      - torch_geometric
+      - torch-scatter
+      - torch-sparse
