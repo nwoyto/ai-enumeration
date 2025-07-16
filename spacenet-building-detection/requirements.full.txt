@@ -1,0 +1,22 @@
+# Unified requirements for SpaceNet preprocessing + training (GPU, PyTorch)
+# Geospatial
+rasterio
+geopandas
+shapely
+fiona
+GDAL
+# ML/Deep Learning
+numpy
+pandas
+torch
+torchvision
+torch-geometric
+torch-scatter
+torch-sparse
+scikit-learn
+timm
+Pillow==9.5.0
+# Utilities
+sagemaker
+tqdm
+# If torch_geometric direct install fails, see: https://pytorch-geometric.com/whl/
