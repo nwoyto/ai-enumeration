@@ -1,4 +1,4 @@
-# List all dependencies for your SageMaker training job
+# List all dependencies for your SpaceNet Building Detection project
 # PyTorch and torchvision versions are usually pre-installed on SageMaker DL Containers.
 # Specify other required libraries here.
 rasterio
@@ -6,6 +6,7 @@ geopandas
 numpy
 pandas
 torch
+torchvision
 fiona
 shapely
 tqdm
@@ -15,6 +16,9 @@ timm          # For the Vision Transformer model
 torch_geometric
 torch-scatter
 torch-sparse
+sagemaker
+# Standard library modules (for documentation, not needed in pip):
+# tarfile, pathlib, time, re, json, shutil, subprocess, logging, sys
 
 # If `torch_geometric` direct install fails due to CUDA/PyTorch version mismatches,
 # you might need to find the specific wheel file from PyG's website (data.pyg.org/whl/)
