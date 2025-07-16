@@ -1,0 +1,5 @@
+# Example requirements
+numpy
+pandas
+torch
+torchvision
