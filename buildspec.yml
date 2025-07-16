@@ -15,10 +15,23 @@ phases:
       - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
       - REPOSITORY_URI=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$IMAGE_REPO_NAME
       - echo $REPOSITORY_URI
+      - echo "Docker version:" && docker --version
+      - echo "Listing Docker images:" && docker images
+      - echo "Checking network connectivity to public ECR..." && curl -I https://public.ecr.aws || echo "curl failed"
+      - echo "Attempting to pull base image..."
+      - docker pull public.ecr.aws/deep-learning-containers/pytorch-training:2.5.1-gpu-py311-cu124-ubuntu22.04-sagemaker-v1.12-2 || echo "Docker pull failed with exit code $?"
   build:
     commands:
       - echo Building the Docker image...
-      - docker build -t $IMAGE_REPO_NAME:latest .
+      - |
+          set -x
+          docker build -t $IMAGE_REPO_NAME:latest . || {
+            echo "Docker build failed! Checking disk space:"
+            df -h
+            echo "Listing images:"
+            docker images
+            exit 1
+          }
       - docker tag $IMAGE_REPO_NAME:latest $REPOSITORY_URI:$IMAGE_TAG
   post_build:
     commands:
