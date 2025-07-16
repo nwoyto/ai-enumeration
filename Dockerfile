@@ -26,9 +26,16 @@ ENV PATH /opt/conda/bin:$PATH
 
 # Create conda environment and install dependencies
 COPY requirements.full.txt /tmp/requirements.full.txt
-RUN conda install -y python=3.9 && \
-    pip install --upgrade pip && \
-    pip install --no-cache-dir -r /tmp/requirements.full.txt
+RUN conda install -y \
+    gdal=3.11.3 \
+    rasterio \
+    geopandas \
+    shapely \
+    fiona \
+    pyproj \
+    && conda clean -afy \
+    && pip install --upgrade pip \
+    && pip install --no-cache-dir -r /tmp/requirements.full.txt
 
 # Set environment variables for GDAL
 ENV CPLUS_INCLUDE_PATH=/usr/include/gdal
