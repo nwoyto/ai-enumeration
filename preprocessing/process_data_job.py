@@ -144,14 +144,6 @@ def process_spacenet_dataset_cloud(raw_input_dir, processed_output_dir, split_ra
             logger.error(f"Error extracting {tar_path.name}: {e}")
             return False
 
-    if not extract_tar(tar_paths['train'], extraction_base_dir):
-        sys.exit(1)
-    if not extract_tar(tar_paths['test'], extraction_base_dir):
-        sys.exit(1)
-    logger.info("Tarball extraction complete.")
-    
-    # Step 2: Generate masks from extracted data
-    logger.info("Starting mask generation for training/validation split...")
     geojson_train_dir = extracted_train_data_base / 'geojson' / 'buildings'
     if rgb_only:
         input_images_path_train = extracted_train_data_base / 'RGB-PanSharpen'
