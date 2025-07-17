@@ -26,16 +26,23 @@ ENV PATH /opt/conda/bin:$PATH
 
 # Create conda environment and install dependencies
 COPY requirements.full.txt /tmp/requirements.full.txt
-RUN conda install -y \
-    gdal=3.11.3 \
-    rasterio \
-    geopandas \
-    shapely \
-    fiona \
-    pyproj \
-    && conda clean -afy \
-    && pip install --upgrade pip \
-    && pip install --no-cache-dir -r /tmp/requirements.full.txt
+# Diagnostics: show conda info and config
+RUN conda info && conda config --show
+
+# Install mamba for faster conda installs and use conda-forge as the highest-priority channel
+RUN conda install -c conda-forge -y mamba && \
+    mamba install -c conda-forge -y \
+        gdal=3.11.3 \
+        rasterio \
+        geopandas \
+        shapely \
+        fiona \
+        pyproj && \
+    conda clean -afy
+
+# Upgrade pip and install only non-geospatial requirements
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r /tmp/requirements.full.txt
 
 # Set environment variables for GDAL
 ENV CPLUS_INCLUDE_PATH=/usr/include/gdal
