@@ -112,33 +112,14 @@ def create_mask_from_geojson(image_path, geojson_path, output_mask_path):
 
 def process_spacenet_dataset_cloud(raw_input_dir, processed_output_dir, split_ratio=0.8, rgb_only=True):
     """
-    Manages tarball extraction and mask generation for SpaceNet data within a cloud processing environment.
+    Manages mask generation for SpaceNet data within a cloud processing environment.
+    Assumes tarballs have already been extracted in the appropriate subdirectories.
     """
     raw_input_path = Path(raw_input_dir)
     processed_output_path = Path(processed_output_dir)
 
-    # Step 1: Extract tarballs within the processing container
-    logger.info("Starting tarball extraction within the processing container...")
-    
-    tar_paths = {
-        'train': raw_input_path / 'SN2_buildings_train_AOI_2_Vegas.tar.gz',
-        'test': raw_input_path / 'AOI_2_Vegas_test_public.tar.gz'
-    }
-
-    # Extraction target: Extract to the raw_input_path parent so that
-    # AOI_2_Vegas_Train and AOI_2_Vegas_Test_Public become siblings of the tarballs
-    # in /opt/ml/processing/input/data/
-    extraction_base_dir = raw_input_path
-
-    def extract_tar(tar_path, dest_dir):
-        if not tar_path.exists():
-            logger.error(f"Tarball not found for extraction: {tar_path}")
-            return False
-        
-        # Determine the expected folder name after extraction for idempotency check
-        if 'train' in tar_path.name:
-            expected_folder_name = 'AOI_2_Vegas_Train'
-        elif 'test' in tar_path.name:
+    # Set up paths to extracted data (assume already extracted by main block)
+    extracted_train_data_base = raw_input_path / 'train' / 'AOI_2_Vegas_Train'
             expected_folder_name = 'AOI_2_Vegas_Test_Public'
         else:
             expected_folder_name = tar_path.stem.replace('.tar', '') # Fallback
@@ -167,16 +148,11 @@ def process_spacenet_dataset_cloud(raw_input_dir, processed_output_dir, split_ra
         sys.exit(1)
     if not extract_tar(tar_paths['test'], extraction_base_dir):
         sys.exit(1)
-        
     logger.info("Tarball extraction complete.")
     
     # Step 2: Generate masks from extracted data
     logger.info("Starting mask generation for training/validation split...")
-    
-    # These paths are now relative to where the tarballs were extracted
-    extracted_train_data_base = extraction_base_dir / 'AOI_2_Vegas_Train'
     geojson_train_dir = extracted_train_data_base / 'geojson' / 'buildings'
-
     if rgb_only:
         input_images_path_train = extracted_train_data_base / 'RGB-PanSharpen'
         image_suffix = '.tif'
