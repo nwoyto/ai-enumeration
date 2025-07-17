@@ -1,5 +1,4 @@
-# Unified requirements for SpaceNet preprocessing + training (GPU, PyTorch)
-# Geospatial
+# Unified requirements for SpaceNet processing + training (GPU, PyTorch)
 # ML/Deep Learning
 numpy
 pandas
