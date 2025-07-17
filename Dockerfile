@@ -1,6 +1,6 @@
 # Dockerfile for SageMaker Processing and Training (GPU, PyTorch, Geospatial)
 
-FROM public.ecr.aws/deep-learning-containers/pytorch-training:2.5.1-gpu-py311-cu124-ubuntu22.04-sagemaker-v1.12
+FROM public.ecr.aws/deep-learning-containers/pytorch-training:2.2.0-gpu-py310-cu118-ubuntu20.04-sagemaker
 
 # Install system dependencies for geospatial libraries and Python
 RUN apt-get update && \
@@ -32,7 +32,7 @@ RUN conda info && conda config --show
 # Install mamba for faster conda installs and use conda-forge as the highest-priority channel
 RUN conda install -c conda-forge -y mamba && \
     mamba install -c conda-forge -y \
-        gdal=3.11.3 \
+        gdal \
         rasterio \
         geopandas \
         shapely \
