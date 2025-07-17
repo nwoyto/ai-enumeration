@@ -38,7 +38,7 @@ logger.info(f"  Processed Masks Output S3: {s3_processed_masks_output_path}")
 logger.info(f"  Raw Images Copy Target S3: {s3_raw_images_target_path}")
 
 # Local path to processing script
-processing_script_path = str(Path('./spacenet-building-detection/preprocessing/process_data_job.py').resolve())
+processing_script_path = str(Path('./preprocessing/process_data_job.py').resolve())
 
 # --- ScriptProcessor using custom container ---
 processor = ScriptProcessor(
@@ -47,6 +47,7 @@ processor = ScriptProcessor(
     role=role,
     instance_type="ml.m5.xlarge",
     instance_count=1,
+    volume_size_in_gb=100,
     sagemaker_session=sagemaker_session,
     base_job_name="spacenet-data-preprocessor"
 )
@@ -58,11 +59,11 @@ processor.run(
     inputs=[
         ProcessingInput(
             source=s3_raw_train_tarball,
-            destination='/opt/ml/processing/input/data/SN2_buildings_train_AOI_2_Vegas.tar.gz'
+            destination='/opt/ml/processing/input/data/train/'  # Directory, not file
         ),
         ProcessingInput(
             source=s3_raw_test_tarball,
-            destination='/opt/ml/processing/input/data/AOI_2_Vegas_Test_public.tar.gz'
+            destination='/opt/ml/processing/input/data/test/'  # Directory, not file
         )
     ],
     outputs=[

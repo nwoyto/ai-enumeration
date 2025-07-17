@@ -235,9 +235,32 @@ if __name__ == '__main__':
     logger.info(f"Processing Job Input Data Path: {input_data_path}")
     logger.info(f"Processing Job Output Masks Path: {output_masks_path}")
 
+    # Debug: Print directory contents to locate tarballs
+    logger.info(f"DEBUG: input_data_path ({input_data_path}) contents: {os.listdir(input_data_path)}")
+    tarballs_found = False
+    for subdir in os.listdir(input_data_path):
+        subdir_path = os.path.join(input_data_path, subdir)
+        if os.path.isdir(subdir_path):
+            logger.info(f"DEBUG: Subdir {subdir_path} contents: {os.listdir(subdir_path)}")
+            # Extract any .tar.gz files in this subdirectory
+            tarballs = [f for f in os.listdir(subdir_path) if f.endswith('.tar.gz')]
+            if tarballs:
+                tarballs_found = True
+            for tarball in tarballs:
+                tarball_path = os.path.join(subdir_path, tarball)
+                logger.info(f"Starting tarball extraction: {tarball_path} -> {subdir_path}")
+                try:
+                    with tarfile.open(tarball_path, 'r:gz') as tar:
+                        tar.extractall(path=subdir_path)
+                except Exception as e:
+                    logger.error(f"Error extracting {tarball_path}: {e}")
+                    raise
+    if not tarballs_found:
+        logger.warning(f"No .tar.gz files found in any subdirectories of {input_data_path}. No extraction performed.")
+
     # You can pass rgb_only as an argument to the processing job if needed.
     # For now, it's hardcoded to True.
-    rgb_only_choice = True # Set to False if you want to preprocess MUL-PanSharpen (8-band) data
+    rgb_only_choice = False # Set to False if you want to preprocess MUL-PanSharpen (8-band) data
 
     process_spacenet_dataset_cloud(
         raw_input_dir=input_data_path,
