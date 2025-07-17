@@ -1,6 +1,6 @@
 # Dockerfile for SageMaker Processing and Training (GPU, PyTorch, Geospatial)
 
-FROM public.ecr.aws/deep-learning-containers/pytorch-training:2.1.0-gpu-py310-cu118-ubuntu20.04
+FROM public.ecr.aws/deep-learning-containers/pytorch-training:2.0.0-gpu-py39-cu117-ubuntu20.04
 
 # Install system dependencies for geospatial libraries and Python
 RUN apt-get update && \
