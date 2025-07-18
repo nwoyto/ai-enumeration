@@ -70,7 +70,7 @@ hyperparameters = {
 # --- Get the correct Docker image URI ---
 framework_version = '2.0.0' # Or the PyTorch version you are using
 py_version = 'py310' # Python version in the SageMaker container
-instance_type = 'ml.g4dn.xlarge' # Or your chosen instance type
+instance_type = 'ml.g4dn.xlarge' # G-series GPU instance for debugging
 
 try:
     training_image_uri = image_uris.retrieve(
