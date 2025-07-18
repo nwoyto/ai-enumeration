@@ -6,7 +6,7 @@ from sagemaker.inputs import TrainingInput
 from sagemaker import image_uris
 import os
 import logging
-
+import sys # <-- Add this line
 # Setup logging (similar to train.py for consistency)
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO) # Use INFO level for launch script
