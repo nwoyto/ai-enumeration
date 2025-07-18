@@ -6,7 +6,8 @@ from sagemaker.inputs import TrainingInput
 from sagemaker import image_uris
 import os
 import logging
-import sys # <-- Add this line
+import sys
+
 # Setup logging (similar to train.py for consistency)
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO) # Use INFO level for launch script
@@ -23,10 +24,9 @@ except Exception as e:
     sys.exit(1)
 
 # Get SageMaker Execution Role
-# The role from the traceback is 'arn:aws:iam::040571275415:role/service-role/AmazonSageMaker-ExecutionRole-20250320T164162'
-# You can hardcode it if it's always the same, or get it dynamically if it's the default
+# CORRECTED: Use sagemaker.get_execution_role() directly
 try:
-    sagemaker_role = sagemaker_session.get_execution_role()
+    sagemaker_role = sagemaker.get_execution_role() # <--- Corrected line
     logger.info(f"Using SageMaker Execution Role: {sagemaker_role}")
 except Exception as e:
     logger.error(f"Error getting SageMaker execution role. Ensure your AWS CLI is configured or the role is defined: {e}")
@@ -44,20 +44,6 @@ s3_val_images = f"{base_s3_uri}/raw_images/RGB-PanSharpen/val" # Assuming 'val' 
 s3_val_masks = f"{base_s3_uri}/processed_masks/val/masks"
 
 # Important: Make sure these S3 paths exist and contain your data!
-# The paths from your traceback logs:
-# Train Images: s3://sagemaker-us-west-2-040571275415/spacenet-building-detection/raw_images/RGB-PanSharpen
-# Train Masks: s3://sagemaker-us-west-2-040571275415/spacenet-building-detection/processed_masks/train/masks
-# Validation Images: s3://sagemaker-us-west-2-040571275415/spacenet-building-detection/raw_images/RGB-PanSharpen
-# Validation Masks: s3://sagemaker-us-west-2-040571275415/spacenet-building-detection/processed_masks/val/masks
-# NOTE: Your S3 paths in the traceback for validation images and masks don't explicitly show '/val/'
-# Make sure your s3_val_images and s3_val_masks variables correctly reflect your S3 structure.
-# If val images are also in RGB-PanSharpen, you might need subfolders like:
-# s3_val_images = f"{base_s3_uri}/raw_images/RGB-PanSharpen/val"
-# s3_val_masks = f"{base_s3_uri}/processed_masks/val/masks"
-# Or if they are truly in the same folder as train:
-# s3_val_images = s3_train_images
-# s3_val_masks = f"{base_s3_uri}/processed_masks/val/masks" # Mask path seems distinct
-
 logger.info("\nTraining Job Configuration:")
 logger.info(f"  Train Images: {s3_train_images}")
 logger.info(f"  Train Masks: {s3_train_masks}")
@@ -87,13 +73,11 @@ hyperparameters = {
 }
 
 # --- Get the correct Docker image URI ---
-# This is the most likely fix for your error
 framework_version = '2.0.0' # Or the PyTorch version you are using
 py_version = 'py310' # Python version in the SageMaker container
 instance_type = 'ml.g4dn.xlarge' # Or your chosen instance type
 
 try:
-    # This function retrieves the appropriate image URI for your region and setup
     training_image_uri = image_uris.retrieve(
         framework='pytorch',
         region=aws_region,
@@ -118,7 +102,7 @@ estimator = PyTorch(
     instance_type=instance_type,
     sagemaker_session=sagemaker_session,
     hyperparameters=hyperparameters,
-    image_uri=training_image_uri, # <--- **Crucial Fix**
+    image_uri=training_image_uri,
     # Other parameters: output_path, checkpoint_s3_uri etc.
     # output_path=f"s3://{bucket_name}/output/spacenet-geoprocessing", # Optional: custom output S3 path
     # checkpoint_s3_uri=f"s3://{bucket_name}/checkpoints/spacenet-geoprocessing", # Optional: for checkpointing
