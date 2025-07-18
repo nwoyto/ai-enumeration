@@ -14,33 +14,28 @@ logger.setLevel(logging.INFO) # Use INFO level for launch script
 logger.addHandler(logging.StreamHandler(sys.stdout))
 
 # --- SageMaker Session Setup ---
-try:
-    sagemaker_session = sagemaker.Session()
-    # Ensure the region matches your S3 bucket region and IAM role setup
-    aws_region = sagemaker_session.boto_region_name
-    logger.info(f"SageMaker session region: {aws_region}")
-except Exception as e:
-    logger.error(f"Error setting up SageMaker session: {e}")
-    sys.exit(1)
+import boto3
+aws_region = 'us-east-1'
+boto3.setup_default_session(region_name=aws_region)
+sagemaker_session = sagemaker.Session(boto_session=boto3.Session(region_name=aws_region))
+logger.info(f"SageMaker session region: {aws_region}")
 
 # Get SageMaker Execution Role
 # CORRECTED: Use sagemaker.get_execution_role() directly
-try:
-    sagemaker_role = sagemaker.get_execution_role() # <--- Corrected line
-    logger.info(f"Using SageMaker Execution Role: {sagemaker_role}")
-except Exception as e:
-    logger.error(f"Error getting SageMaker execution role. Ensure your AWS CLI is configured or the role is defined: {e}")
-    sys.exit(1)
+# Set your SageMaker execution role ARN directly
+sagemaker_role = 'arn:aws:iam::040571275415:role/service-role/AmazonSageMaker-ExecutionRole-20250320T164162'
+logger.info(f"Using SageMaker Execution Role: {sagemaker_role}")
 
 
 # --- S3 Data Paths ---
 # You can define these directly or use default_bucket()
-bucket_name = sagemaker_session.default_bucket() # Gets default bucket for the session's region
+bucket_name = f'sagemaker-{aws_region}-040571275415'
 base_s3_uri = f"s3://{bucket_name}/spacenet-building-detection"
 
-s3_train_images = f"{base_s3_uri}/raw_images/RGB-PanSharpen/train" # Assuming 'train' subdir
+# Updated for unified S3 structure (all RGB images under raw_data/AOI_2_Vegas/PS-RGB)
+s3_train_images = f"{base_s3_uri}/raw_data/AOI_2_Vegas/PS-RGB"
 s3_train_masks = f"{base_s3_uri}/processed_masks/train/masks"
-s3_val_images = f"{base_s3_uri}/raw_images/RGB-PanSharpen/val" # Assuming 'val' subdir
+s3_val_images = f"{base_s3_uri}/raw_data/AOI_2_Vegas/PS-RGB"  # Update if you have a separate val split
 s3_val_masks = f"{base_s3_uri}/processed_masks/val/masks"
 
 # Important: Make sure these S3 paths exist and contain your data!
@@ -64,7 +59,7 @@ hyperparameters = {
     'plot-interval': 5,
     'num-vis-samples': 3,
     'cnn-model': 'resnet50',
-    'num-input-channels': 8, # Important: SpaceNet often has 8-band imagery
+    'num-input-channels': 3, # RGB only
     'pretrained-cnn': True,
     'vit-embed-dim': 768,
     'vit-depth': 4, # As discussed, if you only have one block, this is a placeholder for future stacking
@@ -96,19 +91,14 @@ except Exception as e:
 # --- SageMaker Estimator ---
 estimator = PyTorch(
     entry_point='train.py',
-    source_dir='.', # Points to the directory containing train.py, model.py, dataset.py
+    source_dir='code', # Points to the directory containing train.py, model.py, dataset.py
     role=sagemaker_role,
     instance_count=1,
     instance_type=instance_type,
     sagemaker_session=sagemaker_session,
     hyperparameters=hyperparameters,
     image_uri=training_image_uri,
-    # Other parameters: output_path, checkpoint_s3_uri etc.
-    # output_path=f"s3://{bucket_name}/output/spacenet-geoprocessing", # Optional: custom output S3 path
-    # checkpoint_s3_uri=f"s3://{bucket_name}/checkpoints/spacenet-geoprocessing", # Optional: for checkpointing
-    # Keep wait=False if you want to launch and detach
-    # wait=False,
-    # logs=True, # Show logs in console
+    output_path=f"s3://{bucket_name}/output/spacenet-building-detection", # Model artifacts location
 )
 
 logger.info("\nLaunching SageMaker training job...")

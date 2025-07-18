@@ -1,2 +1,16 @@
-# Deprecated: Use requirements.full.txt as the master pip requirements file.
-# This file is kept for legacy purposes only.
+# If torch_geometric direct install fails, see: https://pytorch-geometric.com/whl/
+# ML/Deep Learning
+# Unified requirements for SpaceNet processing + training (GPU, PyTorch)
+# Utilities
+numpy
+pandas
+Pillow==9.5.0
+sagemaker
+scikit-learn
+timm
+torch
+torch-geometric
+torch-scatter
+torch-sparse
+torchvision
+tqdm
