@@ -3,166 +3,349 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
 from timm.models.vision_transformer import VisionTransformer
-# Import GATConv and Data from torch_geometric (ensure installation)
+from timm.models.layers import PatchEmbed # For embedding patches in ViT style
+# Ensure torch_geometric is installed for GAT
 try:
     from torch_geometric.nn import GATConv
-    # from torch_geometric.data import Data # Data class is for graph data structure
+    from torch_geometric.data import Data # For creating graph batches
 except ImportError:
-    print("WARNING: torch_geometric not found. GAT will use dummy implementation.")
-    # Define dummy classes if PyG is not installed, to allow basic testing
+    raise ImportError("torch_geometric not found. Please install it with pip install torch_geometric")
 
-class SpaceNetFeatureExtractor(nn.Module):
-    def __init__(self, model_name='resnet50', num_input_channels=3, pretrained=True):
+
+class CustomConv1(nn.Module):
+    """
+    Handles varying input channels for pre-trained models.
+    Initializes new channels by averaging/replicating existing 3-channel weights.
+    """
+    def __init__(self, original_conv1: nn.Conv2d, num_input_channels: int):
         super().__init__()
-        # ... (CNN backbone initialization as discussed)
-        self.backbone = models.resnet50(pretrained=False)
-        original_conv1 = self.backbone.conv1
-        self.backbone.conv1 = nn.Conv2d(
+        self.conv = nn.Conv2d(
             num_input_channels,
             original_conv1.out_channels,
             kernel_size=original_conv1.kernel_size,
             stride=original_conv1.stride,
             padding=original_conv1.padding,
-            bias=False
+            bias=original_conv1.bias
         )
-        if num_input_channels == 3 and pretrained:
-             self.backbone = models.resnet50(pretrained=True)
-        elif pretrained:
-             pretrained_state_dict = models.resnet50(pretrained=True).state_dict()
-             new_state_dict = {k: v for k, v in pretrained_state_dict.items() if 'conv1' not in k}
-             self.backbone.load_state_dict(new_state_dict, strict=False)
-
-        self.backbone = nn.Sequential(*list(self.backbone.children())[:-2])
-        self.feature_dim = 2048
+        # Initialize new conv1 weights
+        if num_input_channels != original_conv1.in_channels:
+            # Replicate/average pre-trained weights for new input channels
+            # Example: average across RGB channels for new channels
+            if original_conv1.in_channels == 3:
+                # Take mean of the 3 channels and repeat for extra channels
+                weight = original_conv1.weight.mean(dim=1, keepdim=True).repeat(1, num_input_channels, 1, 1)
+                # Or for more direct replication of first 3 and random for others:
+                # weight = torch.randn(self.conv.weight.shape) * 0.01 # Start with small random
+                # weight[:, :original_conv1.in_channels, :, :] = original_conv1.weight
+                self.conv.weight = nn.Parameter(weight)
+                if original_conv1.bias is not None:
+                    self.conv.bias = nn.Parameter(original_conv1.bias)
+            else: # If original was not 3, just initialize normally
+                nn.init.kaiming_normal_(self.conv.weight, mode='fan_out', nonlinearity='relu')
+                if self.conv.bias is not None:
+                    nn.init.zeros_(self.conv.bias)
+        else: # If input channels match, just copy original weights
+            self.conv.weight = original_conv1.weight
+            if original_conv1.bias is not None:
+                self.conv.bias = original_conv1.bias
 
     def forward(self, x):
-        return self.backbone(x)
+        return self.conv(x)
 
-class HybridBuildingDetector(nn.Module):
-    def __init__(self, cnn_model='resnet50', num_input_channels=3,
-                 vit_patch_size=16, vit_embed_dim=768, vit_depth=6, vit_heads=12,
-                 gat_hidden_channels=256, gat_heads=4, num_classes=1):
+
+class CNNEncoder(nn.Module):
+    def __init__(self, model_name='resnet50', num_input_channels=3, pretrained=True):
         super().__init__()
-        self.num_classes = num_classes
+        if model_name == 'resnet50':
+            backbone = models.resnet50(pretrained=pretrained)
+        elif model_name == 'resnet101':
+            backbone = models.resnet101(pretrained=pretrained)
+        else:
+            raise ValueError(f"Unsupported backbone: {model_name}")
 
-        # 1. CNN Feature Extractor
-        self.cnn_extractor = SpaceNetFeatureExtractor(cnn_model, num_input_channels)
-        cnn_out_channels = self.cnn_extractor.feature_dim
-        cnn_feature_map_size = 7 # Assuming 224x224 input and ResNet50
+        # Modify conv1 for input channels
+        if num_input_channels != 3:
+            backbone.conv1 = CustomConv1(backbone.conv1, num_input_channels)
+            # If pretrained weights are used with non-3 channels, need to handle loading
+            # For simplicity, we assume CustomConv1 handles initial weight transfer.
+            # If 'pretrained=True' was used above, CustomConv1 would have received the original conv1 weights
+            # and adapted them. Other layers remain loaded.
 
-        # 2. Visual Transformer (ViT) Layer
-        self.vit_model = VisionTransformer(
-            img_size=cnn_feature_map_size,
-            patch_size=1, # Each CNN feature cell is a token
-            in_chans=cnn_out_channels,
-            embed_dim=vit_embed_dim,
-            depth=vit_depth,
-            num_heads=vit_heads,
-            global_pool='' # No global pooling or class token for spatial output
-        )
+        # Extract stages for skip connections
+        self.conv1 = nn.Sequential(backbone.conv1, backbone.bn1, backbone.relu, backbone.maxpool)
+        self.layer1 = backbone.layer1 # ~1/4 spatial resolution
+        self.layer2 = backbone.layer2 # ~1/8 spatial resolution
+        self.layer3 = backbone.layer3 # ~1/16 spatial resolution
+        self.layer4 = backbone.layer4 # ~1/32 spatial resolution
 
-        # 3. Graph Attention Mechanism (on ViT output tokens)
-        self.graph_attention_channels = gat_hidden_channels
-        self.gat_proc_linear = nn.Linear(vit_embed_dim, self.graph_attention_channels)
-        self.gat_conv1 = GATConv(self.graph_attention_channels, self.graph_attention_channels, heads=gat_heads, dropout=0.6)
-        self.gat_conv2 = GATConv(self.graph_attention_channels * gat_heads, self.graph_attention_channels, heads=1, concat=False, dropout=0.6)
-        self.dropout = nn.Dropout(0.6)
-
-
-        # 4. Segmentation Head (Decoder to upsample features to mask)
-        # This part combines CNN_features and GAT_features
-        combined_feature_channels = cnn_out_channels + self.graph_attention_channels # Output channels from GAT (gat_hidden_channels)
-        
-        self.final_upsample_conv = nn.Conv2d(combined_feature_channels, 256, kernel_size=3, padding=1)
-        self.upsample_blocks = nn.ModuleList([
-            nn.Sequential(
-                nn.ConvTranspose2d(256, 128, kernel_size=3, stride=2, padding=1, output_padding=1),
-                nn.ReLU(inplace=True),
-            ),
-            nn.Sequential(
-                nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1),
-                nn.ReLU(inplace=True),
-            ),
-            nn.Sequential(
-                nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=1),
-                nn.ReLU(inplace=True),
-            ),
-             nn.Sequential(
-                nn.ConvTranspose2d(32, 16, kernel_size=3, stride=2, padding=1, output_padding=1),
-                nn.ReLU(inplace=True),
-            )
-        ])
-        self.output_conv = nn.Conv2d(16, num_classes, kernel_size=1)
+        # Determine feature dimensions for later use
+        self.out_channels = [
+            backbone.layer1[-1].conv3.out_channels, # For layer1 output
+            backbone.layer2[-1].conv3.out_channels, # For layer2 output
+            backbone.layer3[-1].conv3.out_channels, # For layer3 output
+            backbone.layer4[-1].conv3.out_channels  # For layer4 output
+        ]
 
     def forward(self, x):
-        B, _, H_img, W_img = x.shape
+        x1 = self.conv1(x)
+        x2 = self.layer1(x1) # Output for skip connection
+        x3 = self.layer2(x2) # Output for skip connection
+        x4 = self.layer3(x3) # Output for skip connection
+        x5 = self.layer4(x4) # Highest level features for ViT/GAT
+        return x2, x3, x4, x5 # Return multi-scale features
 
-        # 1. CNN Features
-        cnn_features = self.cnn_extractor(x)
-        _, C_feat, H_feat, W_feat = cnn_features.shape
 
-        # 2. ViT Processing
-        vit_output_tokens = self.vit_model(cnn_features) # (B, H_feat*W_feat, embed_dim) if global_pool='', else (B, tokens+1, embed_dim)
+class HybridViTGATBlock(nn.Module):
+    """
+    A block that combines ViT-like self-attention (or cross-attention)
+    and Graph Attention Network for integrated spatial-global reasoning.
+    Inspired by GFormer's Hybrid-ViT blocks.
+    """
+    def __init__(self, in_channels, embed_dim, num_heads, gat_heads, dropout=0.1):
+        super().__init__()
+        self.norm1 = nn.LayerNorm(in_channels)
         
-        # If the ViT uses a class token (i.e., output is B x (num_patches+1) x embed_dim), remove it:
-        # Check if vit_output_tokens has a class token (e.g., if timm ViT default includes one)
-        # Assuming num_cnn_patches is H_feat * W_feat (7*7=49)
-        num_cnn_patches = H_feat * W_feat
-        if vit_output_tokens.dim() == 3 and vit_output_tokens.shape[1] == num_cnn_patches + 1:
-             vit_output_tokens = vit_output_tokens[:, 1:, :] # Remove class token
+        # Linear projection from CNN features to ViT embed_dim
+        self.proj = nn.Linear(in_channels, embed_dim)
 
-        # Reshape ViT output tokens to spatial feature map (B, embed_dim, H_feat, W_feat)
-        vit_spatial_features = vit_output_tokens.permute(0, 2, 1).reshape(B, self.vit_model.embed_dim, H_feat, W_feat)
+        # ViT-like self-attention (or cross-attention if multiple inputs)
+        # For simplicity, let's use standard self-attention within this block initially.
+        # A more complex cross-attention would take another tensor as input.
+        self.attn = nn.MultiheadAttention(embed_dim, num_heads, dropout=dropout, batch_first=True)
+        
+        self.norm2 = nn.LayerNorm(embed_dim)
+        self.gat_proc_linear = nn.Linear(embed_dim, embed_dim) # Project to GAT input dim if needed
+        self.gat_conv = GATConv(embed_dim, embed_dim // gat_heads, heads=gat_heads, dropout=dropout, concat=True) # Concatenate heads
+        
+        self.norm3 = nn.LayerNorm(embed_dim * gat_heads) # Norm after GAT concat
+        self.mlp = nn.Sequential(
+            nn.Linear(embed_dim * gat_heads, embed_dim), # Reduce back to embed_dim
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(embed_dim, embed_dim),
+            nn.Dropout(dropout)
+        )
+        self.final_norm = nn.LayerNorm(embed_dim)
 
-        # 3. Graph Attention Mechanism
-        # Convert ViT spatial features to node features for GAT
-        node_features_flat = vit_spatial_features.permute(0, 2, 3, 1).reshape(-1, self.vit_model.embed_dim) # (B*H*W, E)
-        node_features_gat_input = self.gat_proc_linear(node_features_flat)
-        node_features_gat_input = self.dropout(node_features_gat_input)
 
-        # Create batch-wise grid-like edge index for GAT (simplified for demonstration)
-        # This part assumes a regular grid graph for each image in the batch
+    def forward(self, x_cnn_feat):
+        # x_cnn_feat: (B, C, H, W)
+        B, C, H, W = x_cnn_feat.shape
+        
+        # 1. Prepare tokens for ViT part
+        # Flatten spatial dimensions to sequence of tokens
+        # (B, C, H, W) -> (B, H*W, C)
+        x_tokens = x_cnn_feat.flatten(2).permute(0, 2, 1) # (B, N_patches, C_in)
+        
+        # Normalize before projection
+        x_tokens = self.norm1(x_tokens)
+        
+        # Project to embed_dim
+        x_vit_input = self.proj(x_tokens) # (B, N_patches, embed_dim)
+        
+        # Add positional encoding (can be learned or fixed)
+        # For this example, assuming external positional encoding or adding it in a wrapper.
+        # Here, it's implicitly handled as part of the attention if `pos_embed` is added externally.
+        
+        # 2. ViT-like Self-Attention
+        attn_output, _ = self.attn(x_vit_input, x_vit_input, x_vit_input)
+        x_after_attn = x_vit_input + attn_output # Residual connection
+        
+        # 3. GAT Layer (on the same tokens, but modeling relations)
+        # Reshape to (N_patches*B, embed_dim) for PyG GATConv input
+        num_nodes_per_batch = H * W
+        node_features_flat = x_after_attn.reshape(-1, x_after_attn.shape[-1]) # (B*N, E)
+        
+        # Create grid-like edge index for GAT (for simplicity; can be dynamic)
+        # For a full batch, need to offset node indices per graph in the batch
         edge_index_list = []
         batch_indices = []
         for i in range(B):
-            num_nodes_per_batch = H_feat * W_feat
             node_offset = i * num_nodes_per_batch
             # Add horizontal edges
-            for r in range(H_feat):
-                for c in range(W_feat - 1):
-                    idx1 = r * W_feat + c + node_offset
-                    idx2 = r * W_feat + (c + 1) + node_offset
+            for r in range(H):
+                for c in range(W - 1):
+                    idx1 = r * W + c + node_offset
+                    idx2 = r * W + (c + 1) + node_offset
                     edge_index_list.extend([[idx1, idx2], [idx2, idx1]])
             # Add vertical edges
-            for r in range(H_feat - 1):
-                for c in range(W_feat):
-                    idx1 = r * W_feat + c + node_offset
-                    idx2 = (r + 1) * W_feat + c + node_offset
+            for r in range(H - 1):
+                for c in range(W):
+                    idx1 = r * W + c + node_offset
+                    idx2 = (r + 1) * W + c + node_offset
                     edge_index_list.extend([[idx1, idx2], [idx2, idx1]])
-            batch_indices.extend([i] * num_nodes_per_batch)
+            # Add diagonal edges (optional, but enhances connectivity)
+            for r in range(H - 1):
+                for c in range(W - 1):
+                    idx1 = r * W + c + node_offset
+                    idx2_diag1 = (r + 1) * W + (c + 1) + node_offset
+                    idx2_diag2 = (r + 1) * W + (c - 1) + node_offset if c > 0 else -1
+                    if idx2_diag1 != -1: edge_index_list.extend([[idx1, idx2_diag1], [idx2_diag1, idx1]])
+                    if idx2_diag2 != -1: edge_index_list.extend([[idx1, idx2_diag2], [idx2_diag2, idx1]])
+
+            batch_indices.extend([i] * num_nodes_per_batch) # PyG Data.batch equivalent
+            
+        edge_index = torch.tensor(edge_index_list, dtype=torch.long).t().contiguous().to(node_features_flat.device)
         
-        # Convert to PyG's expected format
-        edge_index = torch.tensor(edge_index_list, dtype=torch.long).t().contiguous().to(x.device)
-        batch_tensor = torch.tensor(batch_indices, dtype=torch.long).to(x.device)
-
-        x_gat = self.gat_conv1(node_features_gat_input, edge_index)
-        x_gat = F.elu(x_gat)
-        x_gat = self.dropout(x_gat)
-        x_gat = self.gat_conv2(x_gat, edge_index)
+        x_gat_input = self.norm2(node_features_flat) # Normalize before GAT
+        x_gat_input = self.gat_proc_linear(x_gat_input) # Project to GAT input dim
         
-        # Reshape GAT output back to spatial feature map
-        gat_spatial_features = x_gat.reshape(B, H_feat, W_feat, self.graph_attention_channels).permute(0, 3, 1, 2)
+        x_gat = self.gat_conv(x_gat_input, edge_index) # Output (N*B, embed_dim*gat_heads)
+        x_gat = F.elu(x_gat) # Activation after GAT
+        
+        # 4. MLP (Feed-Forward Network)
+        x_after_gat = x_after_attn.reshape(-1, x_after_attn.shape[-1]) + x_gat # Residual + GAT output (align dims)
+        x_after_gat_norm = self.norm3(x_after_gat)
+        
+        mlp_output = self.mlp(x_after_gat_norm)
+        x_final_block_output_flat = x_after_gat_norm + mlp_output # Residual connection
+        x_final_block_output_flat = self.final_norm(x_final_block_output_flat)
 
-        # 4. Concatenate CNN features and GAT-enhanced features
-        combined_features = torch.cat((cnn_features, gat_spatial_features), dim=1)
+        # Reshape back to spatial (B, embed_dim, H, W)
+        x_final_block_output = x_final_block_output_flat.reshape(B, H, W, -1).permute(0, 3, 1, 2)
+        return x_final_block_output
 
-        # 5. Segmentation Head (Decoder)
-        x = self.final_upsample_conv(combined_features)
-        x = F.relu(x, inplace=True)
 
-        for block in self.upsample_blocks:
-            x = block(x)
+class DecoderBlock(nn.Module):
+    def __init__(self, in_channels, skip_channels, out_channels):
+        super().__init__()
+        self.upsample = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=2, stride=2)
+        self.conv_relu = nn.Sequential(
+            nn.Conv2d(out_channels + skip_channels, out_channels, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True)
+        )
 
-        output_mask = self.output_conv(x) # Final segmentation logits
+    def forward(self, x, skip_features):
+        x = self.upsample(x)
+        # Ensure sizes match before concatenation (important for different resolutions)
+        if x.size() != skip_features.size():
+            x = F.interpolate(x, size=skip_features.size()[2:], mode='bilinear', align_corners=False)
+        x = torch.cat([x, skip_features], dim=1)
+        x = self.conv_relu(x)
+        return x
 
+
+class HybridGeoNet(nn.Module):
+    def __init__(self, num_input_channels=8, num_classes=1,
+                 cnn_model='resnet50', pretrained_cnn=True,
+                 vit_embed_dim=768, vit_depth=4, vit_heads=12, gat_heads=4):
+        super().__init__()
+        self.num_classes = num_classes
+
+        # 1. CNN Encoder
+        self.cnn_encoder = CNNEncoder(cnn_model, num_input_channels, pretrained_cnn)
+
+        # Get output channels for relevant encoder stages
+        # ResNet stages: layer1 (C=256), layer2 (C=512), layer3 (C=1024), layer4 (C=2048)
+        # Let's apply ViT-GAT on the highest resolution features (layer4 output)
+        cnn_high_level_channels = self.cnn_encoder.out_channels[3] # 2048 for ResNet50/101
+
+        # 2. Hybrid-ViT-GAT Block
+        # Applying a single block on the highest-level CNN features for simplicity,
+        # but can be multiple stacked blocks.
+        self.hybrid_vit_gat_block = HybridViTGATBlock(
+            in_channels=cnn_high_level_channels,
+            embed_dim=vit_embed_dim,
+            num_heads=vit_heads,
+            gat_heads=gat_heads
+        )
+        # A separate linear layer to project the ViT-GAT output to a usable channel count for fusion
+        self.vit_gat_proj = nn.Conv2d(vit_embed_dim, 512, kernel_size=1) # Project to 512 channels for fusion
+
+        # 3. CNN Decoder with Skip Connections and Global Feature Fusion
+        # Start decoding from the output of the Hybrid-ViT-GAT block
+        # Fusing the projected ViT-GAT output with cnn_encoder.layer4 output
+        
+        # Determine initial decoder input channels after fusion (cnn_high_level_channels + vit_gat_proj_channels)
+        # Let's refine the fusion: take the output of layer4, pass it through ViT-GAT.
+        # The ViT-GAT output will be the "enhanced high-level features".
+        # Then, proceed with a UNet-like decoder.
+        
+        # Initial Conv for decoder, takes the enhanced features from ViT-GAT
+        self.decoder_entry_conv = nn.Conv2d(vit_embed_dim, 1024, kernel_size=3, padding=1) # Assuming vit_embed_dim is input from block
+
+        # Decoder blocks: upsample and concatenate with skip connections
+        # Corresponding skip channels from CNNEncoder: layer3 (1024), layer2 (512), layer1 (256)
+        self.upconv4 = DecoderBlock(1024, self.cnn_encoder.out_channels[2], 512) # from decoder_entry_conv to layer3 skip
+        self.upconv3 = DecoderBlock(512, self.cnn_encoder.out_channels[1], 256)  # from upconv4 to layer2 skip
+        self.upconv2 = DecoderBlock(256, self.cnn_encoder.out_channels[0], 128) # from upconv3 to layer1 skip
+        
+        # Last upsampling to original input resolution scale (e.g. 224x224 after conv1+maxpool for 1/4 res)
+        # Assuming original input H, W are multiples of 32 (ResNet layer4 output is 1/32)
+        # The DecoderBlock upsamples by factor of 2. 3 blocks = 2^3 = 8x upsampling.
+        # If layer1 is 1/4, and layer4 is 1/32, then we need 3 upsampling steps to reach 1/4.
+        # And another upsampling step to reach full resolution after layer1.
+        
+        # Adjusting decoder stages based on typical ResNet/UNet connections:
+        # Layer4 (1/32) -> ViT-GAT -> (Output is at 1/32 scale)
+        # Decoder 1: 1/32 -> 1/16 (uses skip from layer3)
+        # Decoder 2: 1/16 -> 1/8 (uses skip from layer2)
+        # Decoder 3: 1/8 -> 1/4 (uses skip from layer1)
+        # Decoder 4: 1/4 -> 1/1 (uses initial conv1 block features if needed, or simple final upsampling)
+        
+        # Let's adjust decoder structure to be more explicit:
+        self.decoder_layer4 = nn.Sequential(
+            nn.Conv2d(vit_embed_dim, 1024, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+        )
+        self.decoder_layer3 = DecoderBlock(1024, self.cnn_encoder.out_channels[2], 512) # Skip from layer3
+        self.decoder_layer2 = DecoderBlock(512, self.cnn_encoder.out_channels[1], 256) # Skip from layer2
+        self.decoder_layer1 = DecoderBlock(256, self.cnn_encoder.out_channels[0], 128) # Skip from layer1
+
+        # Final upsample to original resolution
+        # From 1/4 resolution (output of decoder_layer1) to original resolution
+        self.final_upsample = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
+        self.final_conv_relu = nn.Sequential(
+            nn.Conv2d(64, 32, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True)
+        )
+
+        self.output_conv = nn.Conv2d(32, num_classes, kernel_size=1)
+
+
+    def forward(self, x):
+        B, C_in, H_in, W_in = x.shape
+
+        # CNN Encoder
+        x2, x3, x4, x5 = self.cnn_encoder(x) # x2(1/4), x3(1/8), x4(1/16), x5(1/32)
+
+        # Hybrid-ViT-GAT Block
+        # Process the deepest CNN features (x5 is Bx2048xH/32xW/32)
+        vit_gat_features = self.hybrid_vit_gat_block(x5) # Bxvit_embed_dimxH/32xW/32
+
+        # Decoder path with skip connections
+        # Start decoding from the enhanced features
+        x = self.decoder_layer4(vit_gat_features) # Bx1024xH/32xW/32
+
+        x = self.decoder_layer3(x, x4) # Input: 1024, Skip: x4(1024), Output: 512. Size: H/16xW/16
+        x = self.decoder_layer2(x, x3) # Input: 512, Skip: x3(512), Output: 256. Size: H/8xW/8
+        x = self.decoder_layer1(x, x2) # Input: 256, Skip: x2(256), Output: 128. Size: H/4xW/4
+
+        # Final upsampling to original resolution
+        x = self.final_upsample(x) # Size: H/2xW/2 (or HxW if input was 1/2 res after initial maxpool)
+        
+        # If initial CNN output was 1/4, this brings it to 1/2. Need one more upsample.
+        # Assuming typical ResNet, output of conv1+maxpool (x1) is 1/4 of original.
+        # So x2 is 1/4, x3 1/8, x4 1/16, x5 1/32.
+        # Decoder 1/32 -> 1/16 (x4)
+        # Decoder 1/16 -> 1/8 (x3)
+        # Decoder 1/8 -> 1/4 (x2)
+        # We need to upsample from H/4xW/4 to H_inxW_in. This requires x1 or initial input features.
+        
+        # Let's ensure the final upsampling is correct.
+        # Assuming original input image is H_in x W_in
+        # x2 is H_in/4 x W_in/4
+        # after decoder_layer1, x is H_in/4 x W_in/4, channels 128
+        
+        # One more upsampling step to reach original resolution
+        # If the input was 224x224, conv1+maxpool makes it 56x56.
+        # x2 is 56x56. So decoder_layer1 output is 56x56.
+        # To get 224x224, we need two more 2x upsamples (56->112->224).
+        
+        x = F.interpolate(x, size=(H_in, W_in), mode='bilinear', align_corners=False)
+        x = self.final_conv_relu(x)
+        
+        output_mask = self.output_conv(x)
         return output_mask

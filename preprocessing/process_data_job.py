@@ -1,4 +1,3 @@
-# preprocessing/process_data_job.py
 import subprocess
 import sys
 
@@ -110,6 +109,42 @@ def create_mask_from_geojson(image_path, geojson_path, output_mask_path):
         logger.error(f"Failed to write mask to {output_mask_path}: {e}")
         return False
 
+# This function was incorrectly interjected into process_spacenet_dataset_cloud.
+# It should be a standalone helper function.
+def extract_tar(tar_path, dest_dir):
+    if not tar_path.exists():
+        logger.error(f"Tarball not found for extraction: {tar_path}")
+        return False
+    
+    # Determine the expected folder name after extraction for idempotency check
+    if 'train' in tar_path.name:
+        expected_folder_name = 'AOI_2_Vegas_Train'
+    elif 'test' in tar_path.name:
+        expected_folder_name = 'AOI_2_Vegas_Test_Public'
+    else:
+        expected_folder_name = tar_path.stem.replace('.tar', '') # Fallback
+
+    extracted_dir_check = dest_dir / expected_folder_name
+
+    if extracted_dir_check.exists() and list(extracted_dir_check.iterdir()):
+        logger.info(f"Directory '{extracted_dir_check.name}' already exists and is not empty. Skipping extraction of {tar_path.name}.")
+        return True # Assume already extracted
+    else:
+        if extracted_dir_check.exists():
+            logger.warning(f"Removing empty/incomplete '{extracted_dir_check.name}' for fresh extraction.")
+            shutil.rmtree(extracted_dir_check)
+
+    logger.info(f"Extracting {tar_path.name} to {dest_dir}...")
+    try:
+        with tarfile.open(tar_path, 'r:gz') as tar:
+            tar.extractall(path=dest_dir) # Use extractall for efficiency
+        logger.info(f"Successfully extracted {tar_path.name}.")
+        return True
+    except Exception as e:
+        logger.error(f"Error extracting {tar_path.name}: {e}")
+        return False
+
+
 def process_spacenet_dataset_cloud(raw_input_dir, processed_output_dir, split_ratio=0.8, rgb_only=True):
     """
     Manages mask generation for SpaceNet data within a cloud processing environment.
@@ -119,30 +154,11 @@ def process_spacenet_dataset_cloud(raw_input_dir, processed_output_dir, split_ra
     processed_output_path = Path(processed_output_dir)
 
     # Set up paths to extracted data (assume already extracted by main block)
+    # The tarballs extract their content into the directory where they are.
+    # So, AOI_2_Vegas_Train is under /opt/ml/processing/input/data/train/AOI_2_Vegas_Train
     extracted_train_data_base = raw_input_path / 'train' / 'AOI_2_Vegas_Train'
-            expected_folder_name = 'AOI_2_Vegas_Test_Public'
-        else:
-            expected_folder_name = tar_path.stem.replace('.tar', '') # Fallback
-
-        extracted_dir_check = dest_dir / expected_folder_name
-
-        if extracted_dir_check.exists() and list(extracted_dir_check.iterdir()):
-            logger.info(f"Directory '{extracted_dir_check.name}' already exists and is not empty. Skipping extraction of {tar_path.name}.")
-            return True # Assume already extracted
-        else:
-            if extracted_dir_check.exists():
-                logger.warning(f"Removing empty/incomplete '{extracted_dir_check.name}' for fresh extraction.")
-                shutil.rmtree(extracted_dir_check)
-
-        logger.info(f"Extracting {tar_path.name} to {dest_dir}...")
-        try:
-            with tarfile.open(tar_path, 'r:gz') as tar:
-                tar.extractall(path=dest_dir) # Use extractall for efficiency
-            logger.info(f"Successfully extracted {tar_path.name}.")
-            return True
-        except Exception as e:
-            logger.error(f"Error extracting {tar_path.name}: {e}")
-            return False
+    # If you later process the test data, it would be:
+    # extracted_test_data_base = raw_input_path / 'test' / 'AOI_2_Vegas_Test_Public'
 
     geojson_train_dir = extracted_train_data_base / 'geojson' / 'buildings'
     if rgb_only:
