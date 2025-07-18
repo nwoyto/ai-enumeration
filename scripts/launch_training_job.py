@@ -58,19 +58,18 @@ estimator = PyTorch(
     entry_point='train.py',
     source_dir=code_dir,
     role=role,
-    framework_version='1.13.1',         # Ensure this PyTorch version matches PyTorch Geometric compatibility
-    py_version='py39',                  # Python version
-    instance_count=1,                   # Number of instances for training
-    instance_type='ml.g4dn.xlarge',     # Recommended GPU instance for deep learning
+    image_uri='040571275415.dkr.ecr.us-east-1.amazonaws.com/spacenet-geoprocessing:latest',  # <-- Your custom ECR image
+    instance_count=1,
+    instance_type='ml.p3.2xlarge',
     hyperparameters=hyperparameters,
-    output_path=f's3://{default_bucket}/{s3_project_prefix}/output', # S3 path for model artifacts
+    output_path=f's3://{default_bucket}/{s3_project_prefix}/output',
     sagemaker_session=sagemaker_session,
-    metric_definitions=[                # Metrics to extract from your train.py logs
-        {'Name': 'Train_Loss', 'Regex': 'Train_Loss=([0-9\\.]+)'},
-        {'Name': 'Validation_Loss', 'Regex': 'Validation_Loss=([0-9\\.]+)'}
+    metric_definitions=[
+        {'Name': 'Train_Loss', 'Regex': 'Train_Loss=([0-9\.]+)'},
+        {'Name': 'Validation_Loss', 'Regex': 'Validation_Loss=([0-9\.]+)'}
     ],
-    debugger_hook_config=False,         # Disable SageMaker Debugger for faster startup
-    max_run=3600 * 4,                   # Max training time in seconds (e.g., 4 hours). Adjust as needed.
+    debugger_hook_config=False,
+    max_run=3600 * 4,
 )
 
 logger.info("\nLaunching SageMaker training job...")
