@@ -394,27 +394,34 @@ class HybridGeoNet(nn.Module):
 
 
     def forward(self, x):
-        B, C_in, H_in, W_in = x.shape # Store original input dimensions for final output interpolation.
+        """
+        x : [B, C_in, H, W]
+        returns output_mask : [B, num_classes, H, W]
+        """
+        B, _, H_in, W_in = x.shape
 
-        # Pass input through the CNN encoder to get multi-scale features.
-        x2, x3, x4, x5 = self.cnn_encoder(x) 
+        # ---------- Encoder ----------
+        x2, x3, x4, x5 = self.cnn_encoder(x)
 
-        # Process the highest-level CNN features (`x5`) with the Hybrid ViT-GAT Block.
-        vit_gat_features = self.hybrid_vit_gat_block(x5) # e.g., (B, 192, H/32, W/32)
+        # ---------- ViT‑GAT ----------
+        x = self.hybrid_vit_gat_block(x5)          # [B,192,H/32,W/32]
 
-        # Start the decoder path with the output of the HybridViTGATBlock.
-        x = self.first_decoder_conv(vit_gat_features)
+        # ---------- Decoder ----------
+        x = self.first_decoder_conv(x)             # [B,512,H/32,W/32]
+        x = self.decoder_up4(x, x4)                # [B,512,H/16,W/16]
+        x = self.decoder_up3(x, x3)                # [B,256,H/8 ,W/8 ]
+        x = self.decoder_up2(x, x2)                # [B,128,H/4 ,W/4 ]
 
-        # Apply decoder blocks, upsampling and incorporating skip connections.
-        x = self.decoder_up4(x, x4) # x from (H/32 -> H/16), concat with x4 (H/16)
-        x = self.decoder_up3(x, x3) # x from (H/16 -> H/8), concat with x3 (H/8)
-        x = self.decoder_up2(x, x2) # x from (H/8 -> H/4), concat with x2 (H/4)
+        # ↓↓↓ *** critical: 128 → 64 before full‑res up‑scaling ***
+        x = self.final_upsample(x)                 # [B,64 ,H/2 ,W/2]
 
-        # Interpolate the feature map to the original input image size.
-        x = F.interpolate(x, size=(H_in, W_in), mode='bilinear', align_corners=False)
-        # Apply final convolutional layers.
-        x = self.final_conv_relu(x)
-        
-        # Generate the final output mask (e.g., segmentation mask or detection scores per pixel).
-        output_mask = self.output_conv(x)
+        # up‑scale to original spatial size
+        x = F.interpolate(x, size=(H_in, W_in),
+                        mode="bilinear", align_corners=False)     # [B,64,H,W]
+
+        # ---------- Output head ----------
+        x = self.final_conv_relu(x)                # [B,32,H,W]
+        output_mask = self.output_conv(x)          # [B,num_classes,H,W]
+
         return output_mask
+
