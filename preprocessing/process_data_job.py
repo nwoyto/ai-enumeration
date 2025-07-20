@@ -186,20 +186,28 @@ def process_spacenet_dataset_cloud(raw_input_dir, processed_output_dir, split_ra
     # Define output directories within the processing output path
     output_train_masks_dir = processed_output_path / 'train' / 'masks'
     output_val_masks_dir = processed_output_path / 'val' / 'masks'
+    output_train_images_dir = processed_output_path / 'train' / 'images'
+    output_val_images_dir = processed_output_path / 'val' / 'images'
     output_train_masks_dir.mkdir(parents=True, exist_ok=True)
     output_val_masks_dir.mkdir(parents=True, exist_ok=True)
+    output_train_images_dir.mkdir(parents=True, exist_ok=True)
+    output_val_images_dir.mkdir(parents=True, exist_ok=True)
 
     train_ids, val_ids = train_test_split(common_image_ids, test_size=1-split_ratio, random_state=42)
     logger.info(f"Splitting data: {len(train_ids)} for training, {len(val_ids)} for validation.")
 
     for split_type, ids in [('train', train_ids), ('val', val_ids)]:
-        logger.info(f"Generating {split_type} masks...")
+        logger.info(f"Generating {split_type} masks and copying images...")
         current_output_mask_dir = output_train_masks_dir if split_type == 'train' else output_val_masks_dir
-        for img_id in tqdm(ids, desc=f"Generating {split_type} masks"):
+        current_output_image_dir = output_train_images_dir if split_type == 'train' else output_val_images_dir
+        for img_id in tqdm(ids, desc=f"Generating {split_type} masks and copying images"):
             image_path = image_id_to_paths[img_id]
             geojson_path = geojson_id_to_paths[img_id]
             output_mask_path = current_output_mask_dir / f"{img_id}.tif"
+            output_image_path = current_output_image_dir / f"{img_id}.tif"
             create_mask_from_geojson(image_path, geojson_path, output_mask_path)
+            # Copy the image file to the output images directory
+            shutil.copy2(image_path, output_image_path)
             
     logger.info("Mask generation complete.")
     train_mask_count = len(list(output_train_masks_dir.iterdir()))

@@ -16,36 +16,9 @@ from datetime import datetime # For timestamp in summary report
 # Import your custom modules
 from model import HybridGeoNet # Assuming model.py defines HybridGeoNet
 
-# --- Placeholder for SpaceNetBuildingDataset ---
-# YOU MUST REPLACE THIS WITH YOUR ACTUAL SpaceNetBuildingDataset IMPLEMENTATION.
-# This placeholder generates dummy data for the script to run without errors.
-class SpaceNetBuildingDataset(torch.utils.data.Dataset):
-    def __init__(self, image_root_dir, mask_root_dir, num_input_channels, img_size=(224, 224)):
-        self.image_root_dir = image_root_dir
-        self.mask_root_dir = mask_root_dir
-        self.num_input_channels = num_input_channels
-        self.img_size = img_size
-        
-        # In a real scenario, you'd list and load actual image and mask files.
-        # Example: self.image_files = sorted([f for f in os.listdir(image_root_dir) if f.endswith('.tif')])
-        # For this placeholder, we'll just simulate a dataset size.
-        self.num_samples = 1000 # Example number of samples
-        logger.info(f"Initialized dummy SpaceNetBuildingDataset with {self.num_samples} samples.")
-
-    def __len__(self):
-        return self.num_samples
-
-    def __getitem__(self, idx):
-        # Generate dummy data for demonstration
-        image = torch.rand(self.num_input_channels, self.img_size[0], self.img_size[1]).float() * 0.8 + 0.1 # Values between 0.1 and 0.9
-        mask = torch.randint(0, 2, (1, self.img_size[0], self.img_size[1])).float() # Binary mask (0 or 1)
-
-        # IMPORTANT: In your actual implementation, ensure:
-        # 1. Images are loaded as float tensors (e.g., torch.float32)
-        # 2. Masks are binary (0 or 1) float tensors (e.g., torch.float32)
-        # 3. Proper image normalization (e.g., to [0,1] or [-1,1]) if not already handled by input data
-        return image, mask
-# --- END Placeholder ---
+# --- Import the real SpaceNetBuildingDataset implementation ---
+from dataset import SpaceNetBuildingDataset
+# The actual implementation is now used for real image and mask loading.
 
 
 # Setup logging
