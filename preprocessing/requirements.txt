@@ -1,7 +1,0 @@
-# Deprecated: Use requirements.full.txt for pip dependencies and Dockerfile for geospatial stack via conda/mamba.
-# This file is kept for legacy purposes only.
-# Required for process_data_job.py in preprocessing
-numpy
-scikit-learn
-tqdm
-pandas
