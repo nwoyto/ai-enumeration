@@ -103,13 +103,16 @@ estimator = PyTorch(
 
 logger.info("\nLaunching SageMaker training job...")
 # Use TrainingInput for data channels
+# --- S3 Data Inputs for SageMaker ---
+inputs = {
+    'train_images': TrainingInput('s3://sagemaker-us-east-1-040571275415/spacenet-building-detection/processed_masks/train/images/', distribution='FullyReplicated'),
+    'train_masks':  TrainingInput('s3://sagemaker-us-east-1-040571275415/spacenet-building-detection/processed_masks/train/masks/', distribution='FullyReplicated'),
+    'val_images':   TrainingInput('s3://sagemaker-us-east-1-040571275415/spacenet-building-detection/processed_masks/val/images/', distribution='FullyReplicated'),
+    'val_masks':    TrainingInput('s3://sagemaker-us-east-1-040571275415/spacenet-building-detection/processed_masks/val/masks/', distribution='FullyReplicated')
+}
+
 estimator.fit(
-    inputs={
-        'train_images': TrainingInput(s3_train_images, distribution='FullyReplicated'),
-        'train_masks': TrainingInput(s3_train_masks, distribution='FullyReplicated'),
-        'val_images': TrainingInput(s3_val_images, distribution='FullyReplicated'),
-        'val_masks': TrainingInput(s3_val_masks, distribution='FullyReplicated')
-    },
+    inputs=inputs,
     wait=True, # Set to True to wait for completion, False to detach
     logs='All' # 'All' for full logs, 'None' for no logs in console
 )

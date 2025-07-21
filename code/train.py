@@ -1,4 +1,16 @@
 import argparse
+import sys
+import subprocess
+
+def install(package):
+    subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+
+for pkg in ["rasterio", "geopandas", "shapely", "tqdm", "scikit-learn", "pandas"]:
+    try:
+        __import__(pkg)
+    except ImportError:
+        install(pkg)
+
 import os
 import torch
 import torch.nn as nn
@@ -172,11 +184,13 @@ def train(args):
         mask_root_dir=train_mask_dir,
         num_input_channels=num_input_channels
     )
+    logger.info(f"[PAIRING CHECK] Train dataset: {len(train_dataset)} valid image-mask pairs found.")
     val_dataset = SpaceNetBuildingDataset(
         image_root_dir=val_image_dir,
         mask_root_dir=val_mask_dir,
         num_input_channels=num_input_channels
     )
+    logger.info(f"[PAIRING CHECK] Val dataset: {len(val_dataset)} valid image-mask pairs found.")
 
     train_loader = DataLoader(
         train_dataset,
