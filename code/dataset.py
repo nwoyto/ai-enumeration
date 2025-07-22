@@ -9,10 +9,10 @@ import os
 import re
 
 class SpaceNetBuildingDataset(Dataset):
-    def __init__(self, image_root_dir, mask_root_dir, transform=None, num_input_channels=3):
+    def __init__(self, image_root_dir, mask_root_dir, augment=None, num_input_channels=3):
         self.image_root_dir = Path(image_root_dir)
         self.mask_root_dir = Path(mask_root_dir)
-        self.transform = transform
+        self.augment = augment if augment is not None else self._default_augment()
         self.num_input_channels = num_input_channels
 
         # Collect image and mask files based on a common ID
@@ -36,7 +36,25 @@ class SpaceNetBuildingDataset(Dataset):
     def __len__(self):
         return len(self.data_pairs)
 
+    def _default_augment(self):
+        import albumentations as A
+        # Default: geometric + photometric augmentations
+        # Resize to 224x224, then augment
+        return A.Compose([
+            A.Resize(224, 224),
+            A.HorizontalFlip(p=0.5),
+            A.VerticalFlip(p=0.5),
+            A.RandomRotate90(p=0.5),
+            A.Affine(scale=(0.9, 1.1), translate_percent=(0.05, 0.05), shear=(-10, 10), p=0.5),
+            A.ElasticTransform(alpha=1, sigma=50, alpha_affine=10, p=0.3),
+            A.RandomBrightnessContrast(p=0.5),
+            A.GaussNoise(var_limit=(10.0, 50.0), p=0.3),
+            A.GaussianBlur(blur_limit=(3, 7), p=0.2),
+            # Note: HueSaturationValue would only be appropriate for RGB bands
+        ], additional_targets={'mask': 'mask'})
+
     def __getitem__(self, idx):
+        import albumentations as A
         data_info = self.data_pairs[idx]
         image_path = data_info['image_path']
         mask_path = data_info['mask_path']
@@ -49,26 +67,20 @@ class SpaceNetBuildingDataset(Dataset):
         # Load mask (binary TIFF)
         with rasterio.open(mask_path) as src:
             mask = src.read(1).astype(np.float32) # (H, W) float32, 0 or 1
-        mask = np.expand_dims(mask, axis=0) # Add channel dimension (1, H, W)
 
-        image_tensor = torch.from_numpy(image)
-        mask_tensor = torch.from_numpy(mask)
+        # Albumentations expects HWC
+        image = np.transpose(image, (1, 2, 0)) # (H, W, C)
+        mask = mask.astype(np.uint8) # (H, W), 0 or 1
 
-        # Apply transformations
-        if self.transform:
-            # You can chain more transforms here if needed, or refine the internal ones.
-            pass # Currently, transformations are handled internally in dataset logic if `transform` is None.
+        augmented = self.augment(image=image, mask=mask)
+        image = augmented['image']
+        mask = augmented['mask']
 
-        # Ensure consistent resizing and normalization
-        resize_transform = transforms.Resize((224, 224), antialias=True)
-        resize_mask_transform = transforms.Resize((224, 224), interpolation=transforms.InterpolationMode.NEAREST_EXACT)
-        
-        image_tensor = resize_transform(image_tensor)
-        mask_tensor = resize_mask_transform(mask_tensor)
+        # Convert back to CHW for PyTorch
+        image = np.transpose(image, (2, 0, 1)) # (C, H, W)
+        mask = np.expand_dims(mask, axis=0) # (1, H, W)
 
-        mean_vals = [0.5] * self.num_input_channels
-        std_vals = [0.5] * self.num_input_channels
-        normalize_transform = transforms.Normalize(mean=mean_vals, std=std_vals)
-        image_tensor = normalize_transform(image_tensor)
+        image_tensor = torch.from_numpy(image).float()
+        mask_tensor = torch.from_numpy(mask).float()
 
         return image_tensor, mask_tensor
