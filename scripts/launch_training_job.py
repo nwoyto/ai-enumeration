@@ -70,22 +70,10 @@ hyperparameters = {
 # --- Get the correct Docker image URI ---
 framework_version = '2.0.0' # Or the PyTorch version you are using
 py_version = 'py310' # Python version in the SageMaker container
-instance_type = 'ml.g4dn.xlarge' # G-series GPU instance for debugging
+instance_type = 'ml.p3.2xlarge' # P3 GPU instance for high compute
 
-try:
-    training_image_uri = image_uris.retrieve(
-        framework='pytorch',
-        region=aws_region,
-        version=framework_version,
-        py_version=py_version,
-        instance_type=instance_type,
-        image_scope='training'
-    )
-    logger.info(f"Using SageMaker training image: {training_image_uri}")
-except Exception as e:
-    logger.error(f"Error retrieving SageMaker image URI: {e}")
-    logger.error("Common issues: wrong framework version, py_version, or instance_type for your region.")
-    sys.exit(1)
+training_image_uri = "040571275415.dkr.ecr.us-east-1.amazonaws.com/spacenet-geoprocessing:latest"
+logger.info(f"Using custom SageMaker training image: {training_image_uri}")
 
 
 # --- SageMaker Estimator ---
@@ -98,7 +86,7 @@ estimator = PyTorch(
     sagemaker_session=sagemaker_session,
     hyperparameters=hyperparameters,
     image_uri=training_image_uri,
-    output_path=f"s3://{bucket_name}/output/spacenet-building-detection", # Model artifacts location
+    output_path=output_path
 )
 
 logger.info("\nLaunching SageMaker training job...")
