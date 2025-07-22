@@ -47,7 +47,7 @@ processor = ScriptProcessor(
     role=role,
     instance_type="ml.m5.xlarge",
     instance_count=1,
-    volume_size_in_gb=100,
+    volume_size_in_gb=200,
     sagemaker_session=sagemaker_session,
     base_job_name="spacenet-data-preprocessor"
 )

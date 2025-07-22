@@ -13,4 +13,5 @@ Pillow==9.5.0
 # Utilities
 sagemaker
 tqdm
+albumentations
 # If torch_geometric direct install fails, see: https://pytorch-geometric.com/whl/
