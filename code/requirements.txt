@@ -14,3 +14,6 @@ torch-scatter
 torch-sparse
 torchvision
 tqdm
+albumentations
+rasterio
+geopandas

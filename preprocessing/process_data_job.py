@@ -5,7 +5,7 @@ def install(package):
     subprocess.check_call([sys.executable, "-m", "pip", "install", package])
 
 # List your dependencies here
-for pkg in ["rasterio", "geopandas", "shapely", "tqdm", "scikit-learn", "pandas"]:
+for pkg in ["rasterio", "geopandas", "shapely", "tqdm", "scikit-learn", "pandas", "albumentations"]:
     try:
         __import__(pkg)
     except ImportError:

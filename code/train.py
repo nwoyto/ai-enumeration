@@ -122,7 +122,7 @@ def plot_curves(train_losses, val_losses, val_ious, val_dices, epoch, best_val_i
     plt.close()
 
 # --- Summary Report Generation ---
-def generate_summary_report(args, best_val_iou, best_iou_epoch_num, train_losses, val_losses, val_dices, output_img_dir):
+def generate_summary_report(args, best_val_iou, best_iou_epoch_num, train_losses, val_losses, val_dices, output_img_dir, metrics_table):
     report_path = os.path.join(args.output_data_dir, 'training_summary_report.md')
     with open(report_path, 'w') as f:
         f.write(f"# Training Summary Report for Building Detector 🏗️\n\n")
@@ -160,7 +160,12 @@ def generate_summary_report(args, best_val_iou, best_iou_epoch_num, train_losses
             f.write(f"![Sample {i+1} Prediction Overlay](images/val_pred_overlay_epoch{args.epochs-1}_sample{i}.png)\n\n")
         
         f.write("\n")
-        f.write("---")
+        f.write("---\n")
+        f.write("## Summary Table of Epoch Metrics\n")
+        f.write("| Epoch | Train Loss | Validation Loss | Validation IoU | Validation Dice |\n")
+        f.write("| --- | --- | --- | --- | --- |\n")
+        for row in metrics_table:
+            f.write(f"| {row['epoch']} | {row['train_loss']:.4f} | {row['val_loss']:.4f} | {row['val_iou']:.4f} | {row['val_dice']:.4f} |\n")
     logger.info(f"Summary report generated at {report_path}")
 
 
@@ -179,15 +184,21 @@ def train(args):
     # Data preparation
     num_input_channels = args.num_input_channels
 
+    # Gracefully handle s3_bucket for SageMaker
+    s3_bucket = getattr(args, 's3_bucket', os.environ.get('S3_BUCKET', None))
     train_dataset = SpaceNetBuildingDataset(
-        image_root_dir=train_image_dir,
-        mask_root_dir=train_mask_dir,
+        s3_bucket=s3_bucket,
+        image_s3_path_prefix=train_image_dir,
+        mask_s3_path_prefix=train_mask_dir,
+        augment_mode='train',
         num_input_channels=num_input_channels
     )
     logger.info(f"[PAIRING CHECK] Train dataset: {len(train_dataset)} valid image-mask pairs found.")
     val_dataset = SpaceNetBuildingDataset(
-        image_root_dir=val_image_dir,
-        mask_root_dir=val_mask_dir,
+        s3_bucket=s3_bucket,
+        image_s3_path_prefix=val_image_dir,
+        mask_s3_path_prefix=val_mask_dir,
+        augment_mode='val',
         num_input_channels=num_input_channels
     )
     logger.info(f"[PAIRING CHECK] Val dataset: {len(val_dataset)} valid image-mask pairs found.")
@@ -248,6 +259,9 @@ def train(args):
     
     output_img_dir = os.path.join(args.output_data_dir, "images")
     os.makedirs(output_img_dir, exist_ok=True)
+
+    # --- Initialize metrics table for CSV output ---
+    metrics_table = []
 
     for epoch in range(args.epochs):
         model.train()
@@ -310,6 +324,15 @@ def train(args):
         val_dices.append(avg_val_dice)
 
         logger.info(f'Validation set: Average loss: {val_loss:.4f}, IoU: {avg_val_iou:.4f}, Dice: {avg_val_dice:.4f}')
+
+        # --- Append metrics to table for CSV ---
+        metrics_table.append({
+            'epoch': epoch,
+            'train_loss': avg_train_loss,
+            'val_loss': val_loss,
+            'val_iou': avg_val_iou,
+            'val_dice': avg_val_dice,
+        })
         
         # Print metrics for SageMaker CloudWatch parsing
         print(f'sagemaker_metric: Train_Loss={avg_train_loss:.6f}')
@@ -351,51 +374,52 @@ def train(args):
                 preds = torch.sigmoid(preds)
                 preds = (preds > 0.5).float()
                 
-                # Plot first N samples
+                # Plot first N samples with improved overlays and titles
                 for i in range(min(args.num_vis_samples, val_images.shape[0])):
-                    fig, axs = plt.subplots(1, 4, figsize=(16, 4)) # Adjusted for 4 plots
+                    fig, axs = plt.subplots(1, 4, figsize=(18, 4))
 
                     # --- Plot 1: Input Image (RGB) ---
                     img_np = val_images[i].detach().cpu().numpy()
-                    # Transpose to (H, W, C) for matplotlib imshow
-                    if img_np.shape[0] > 3: # If multi-channel, take first 3 for RGB display
+                    if img_np.shape[0] > 3:
                         img_np_display = np.transpose(img_np[:3], (1, 2, 0))
-                    else: # Assuming 1 or 3 channels already (C, H, W)
+                    else:
                         img_np_display = np.transpose(img_np, (1, 2, 0))
-                    
-                    # Normalize image for display if it's not already in [0,1]
-                    # This depends on your SpaceNetBuildingDataset's normalization strategy.
-                    # Example for normalization from [-1, 1] to [0, 1] for display:
-                    # img_np_display = (img_np_display + 1) / 2.0
-                    # For a general case, clamp to [0,1] if it's float:
                     img_np_display = np.clip(img_np_display, 0, 1)
 
                     axs[0].imshow(img_np_display)
-                    axs[0].set_title('Input Image (RGB)', fontsize=10)
+                    axs[0].set_title('Input Image (RGB)', fontsize=12, wrap=True)
 
                     # --- Plot 2: Ground Truth Mask ---
-                    gt_mask_np = val_masks[i][0].detach().cpu().numpy() # [0] because mask is 1xHxW
-                    axs[1].imshow(gt_mask_np, cmap='gray', vmin=0, vmax=1)
-                    axs[1].set_title('Ground Truth Mask', fontsize=10)
+                    gt_mask_np = val_masks[i][0].detach().cpu().numpy()
+                    axs[1].imshow(img_np_display, alpha=0.7)
+                    axs[1].imshow(gt_mask_np, cmap='spring', alpha=0.4, vmin=0, vmax=1)
+                    axs[1].set_title('GT Mask Overlay', fontsize=12, wrap=True)
 
                     # --- Plot 3: Predicted Mask (Binary) ---
-                    pred_mask_np = preds[i][0].detach().cpu().numpy() # [0] because prediction is 1xHxW
-                    axs[2].imshow(pred_mask_np, cmap='gray', vmin=0, vmax=1)
-                    axs[2].set_title('Predicted Mask (Binary)', fontsize=10)
+                    pred_mask_np = preds[i][0].detach().cpu().numpy()
+                    axs[2].imshow(img_np_display, alpha=0.7)
+                    axs[2].imshow(pred_mask_np, cmap='autumn', alpha=0.4, vmin=0, vmax=1)
+                    axs[2].set_title('Pred Mask Overlay', fontsize=12, wrap=True)
 
-                    # --- Plot 4: Overlayed Prediction ---
-                    axs[3].imshow(img_np_display) # Start with the image background
-                    # Create a red overlay for buildings (predicted=1)
-                    overlay = np.zeros(img_np_display.shape)
-                    overlay[:, :, 0] = pred_mask_np * 1.0 # Set red channel for predicted buildings
-                    axs[3].imshow(overlay, alpha=0.4) # Adjust alpha for transparency
-                    axs[3].set_title('Prediction Overlay', fontsize=10)
+                    # --- Plot 4: Overlayed Prediction vs GT ---
+                    axs[3].imshow(img_np_display, alpha=0.7)
+                    axs[3].imshow(gt_mask_np, cmap='spring', alpha=0.3, vmin=0, vmax=1)
+                    axs[3].imshow(pred_mask_np, cmap='autumn', alpha=0.3, vmin=0, vmax=1)
+                    axs[3].set_title(f'Overlay GT (green) & Pred (orange)\nEpoch {epoch} Sample {i}', fontsize=11, wrap=True)
 
                     for ax in axs:
                         ax.axis('off')
-                    plt.tight_layout()
-                    plt.savefig(os.path.join(output_img_dir, f'val_pred_overlay_epoch{epoch}_sample{i}.png'))
+                    plt.tight_layout(rect=[0, 0, 1, 0.95])
+                    plt.subplots_adjust(top=0.85)
+                    fig.suptitle(f'Validation Visualization\nEpoch {epoch} Sample {i}', fontsize=14)
+                    plt.savefig(os.path.join(output_img_dir, f'val_pred_overlay_epoch{epoch}_sample{i}.png'), dpi=120)
                     plt.close()
+
+    # --- Save metrics table as CSV for review ---
+    metrics_df = pd.DataFrame(metrics_table)
+    metrics_csv_path = os.path.join(args.output_data_dir, 'metrics_per_epoch.csv')
+    metrics_df.to_csv(metrics_csv_path, index=False)
+    logger.info(f"Saved per-epoch metrics table at {metrics_csv_path}")
 
     # Save the final trained model (can also just rely on best_model.pth)
     logger.info(f"Saving final model to {args.model_dir}/final_model.pth")

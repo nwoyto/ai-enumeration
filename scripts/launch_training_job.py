@@ -49,7 +49,7 @@ logger.info(f"  Validation Masks: {s3_val_masks}")
 # --- Hyperparameters for the training script ---
 hyperparameters = {
     'batch-size': 16,
-    'epochs': 50,
+    'epochs': 100,
     'learning-rate': 0.0001,
     'log-interval': 10,
     'num-workers': 4,
@@ -59,7 +59,7 @@ hyperparameters = {
     'plot-interval': 5,
     'num-vis-samples': 3,
     'cnn-model': 'resnet50',
-    'num-input-channels': 3, # RGB only
+    'num-input-channels': 8, # RGB only = 3; MS = 8
     'pretrained-cnn': True,
     'vit-embed-dim': 768,
     'vit-depth': 4, # As discussed, if you only have one block, this is a placeholder for future stacking
