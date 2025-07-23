@@ -77,6 +77,11 @@ logger.info(f"Using custom SageMaker training image: {training_image_uri}")
 
 
 # --- SageMaker Estimator ---
+from datetime import datetime
+
+# Define a unique output path for this training job
+output_path = f"{base_s3_uri}/training-outputs/{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+
 estimator = PyTorch(
     entry_point='train.py',
     source_dir='code', # Points to the directory containing train.py, model.py, dataset.py
