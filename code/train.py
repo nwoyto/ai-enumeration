@@ -29,8 +29,11 @@ from datetime import datetime # For timestamp in summary report
 from model import HybridGeoNet # Assuming model.py defines HybridGeoNet
 
 # --- Import the real SpaceNetBuildingDataset implementation ---
-from dataset import SpaceNetBuildingDataset, S3_BUCKET as DEFAULT_S3_BUCKET
+from dataset import SpaceNetBuildingDataset
 # The actual implementation is now used for real image and mask loading.
+
+# Set a robust default for S3 bucket
+DEFAULT_S3_BUCKET = "sagemaker-us-east-1-040571275415"
 
 
 # Setup logging

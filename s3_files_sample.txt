@@ -1,0 +1,5 @@
+2025-07-22 03:07:50    6765624 spacenet-building-detection/processed_masks/train/images/AOI_2_Vegas_img10.tif
+2025-07-22 03:07:50    6765624 spacenet-building-detection/processed_masks/train/images/AOI_2_Vegas_img1000.tif
+2025-07-22 03:07:50    6765624 spacenet-building-detection/processed_masks/train/images/AOI_2_Vegas_img1002.tif
+2025-07-22 03:07:50    6765624 spacenet-building-detection/processed_masks/train/images/AOI_2_Vegas_img1003.tif
+2025-07-22 03:07:50    6765624 spacenet-building-detection/processed_masks/train/images/AOI_2_Vegas_img1004.tif
