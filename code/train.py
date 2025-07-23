@@ -29,7 +29,7 @@ from datetime import datetime # For timestamp in summary report
 from model import HybridGeoNet # Assuming model.py defines HybridGeoNet
 
 # --- Import the real SpaceNetBuildingDataset implementation ---
-from dataset import SpaceNetBuildingDataset
+from dataset import SpaceNetBuildingDataset, S3_BUCKET as DEFAULT_S3_BUCKET
 # The actual implementation is now used for real image and mask loading.
 
 
@@ -185,7 +185,7 @@ def train(args):
     num_input_channels = args.num_input_channels
 
     # Gracefully handle s3_bucket for SageMaker
-    s3_bucket = getattr(args, 's3_bucket', os.environ.get('S3_BUCKET', None))
+    s3_bucket = getattr(args, 's3_bucket', os.environ.get('S3_BUCKET', DEFAULT_S3_BUCKET))
     train_dataset = SpaceNetBuildingDataset(
         s3_bucket=s3_bucket,
         image_s3_path_prefix=train_image_dir,
