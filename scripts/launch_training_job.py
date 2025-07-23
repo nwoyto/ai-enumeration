@@ -70,7 +70,7 @@ hyperparameters = {
 # --- Get the correct Docker image URI ---
 framework_version = '2.0.0' # Or the PyTorch version you are using
 py_version = 'py310' # Python version in the SageMaker container
-instance_type = 'ml.p3.2xlarge' # P3 GPU instance for high compute
+instance_type = 'ml.g4dn.xlarge' # G4 GPU instance for cost-effective debugging
 
 training_image_uri = "040571275415.dkr.ecr.us-east-1.amazonaws.com/spacenet-geoprocessing:latest"
 logger.info(f"Using custom SageMaker training image: {training_image_uri}")

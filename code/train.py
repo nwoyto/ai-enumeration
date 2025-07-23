@@ -186,6 +186,12 @@ def train(args):
 
     # Gracefully handle s3_bucket for SageMaker
     s3_bucket = getattr(args, 's3_bucket', os.environ.get('S3_BUCKET', DEFAULT_S3_BUCKET))
+    # Debug: List files in image/mask directories
+    import os
+    logger.info(f"Files in train_images_dir ({train_image_dir}): {os.listdir(train_image_dir) if os.path.exists(train_image_dir) else 'NOT FOUND'}")
+    logger.info(f"Files in train_masks_dir ({train_mask_dir}): {os.listdir(train_mask_dir) if os.path.exists(train_mask_dir) else 'NOT FOUND'}")
+    logger.info(f"Files in val_images_dir ({val_image_dir}): {os.listdir(val_image_dir) if os.path.exists(val_image_dir) else 'NOT FOUND'}")
+    logger.info(f"Files in val_masks_dir ({val_mask_dir}): {os.listdir(val_mask_dir) if os.path.exists(val_mask_dir) else 'NOT FOUND'}")
     train_dataset = SpaceNetBuildingDataset(
         s3_bucket=s3_bucket,
         image_s3_path_prefix=train_image_dir,

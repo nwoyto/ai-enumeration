@@ -60,6 +60,19 @@ class SpaceNetBuildingDataset(Dataset):
             'id': img_id
         } for img_id in common_ids]
         
+        logger = logging.getLogger(__name__)
+        logger.info(f"[SpaceNetBuildingDataset] S3 bucket: {self.s3_bucket}")
+        logger.info(f"[SpaceNetBuildingDataset] Image S3 prefix: {self.image_s3_path_prefix}")
+        logger.info(f"[SpaceNetBuildingDataset] Mask S3 prefix: {self.mask_s3_path_prefix}")
+        logger.info(f"[SpaceNetBuildingDataset] Augment mode: {augment_mode}, Num input channels: {self.num_input_channels}")
+        logger.info(f"[SpaceNetBuildingDataset] Found {len(all_image_s3_paths)} image files and {len(all_mask_s3_paths)} mask files.")
+        logger.info(f"[SpaceNetBuildingDataset] Sample image files: {list(all_image_s3_paths)[:5]}")
+        logger.info(f"[SpaceNetBuildingDataset] Sample mask files: {list(all_mask_s3_paths)[:5]}")
+        logger.info(f"[SpaceNetBuildingDataset] Unique image IDs: {list(self.image_id_to_path.keys())[:5]} ... (total {len(self.image_id_to_path)})")
+        logger.info(f"[SpaceNetBuildingDataset] Unique mask IDs: {list(self.mask_id_to_path.keys())[:5]} ... (total {len(self.mask_id_to_path)})")
+        logger.info(f"[SpaceNetBuildingDataset] Found {len(common_ids)} common IDs (paired samples)")
+        logger.info(f"[SpaceNetBuildingDataset] Successfully initialized with {len(self.data_pairs)} valid image-mask pairs in '{augment_mode}' mode.")
+
         print(f"Initialized SpaceNetBuildingDataset with {len(self.data_pairs)} valid image-mask pairs in '{augment_mode}' mode.")
 
     def _extract_id(self, filename):
