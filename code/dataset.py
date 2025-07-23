@@ -11,7 +11,7 @@ import s3fs
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 import random
-
+import logging
 # --- S3 Configuration ---
 S3_BUCKET = "sagemaker-us-east-1-040571275415"
 # Make sure this points to your 8-channel multispectral images
