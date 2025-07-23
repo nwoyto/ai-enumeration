@@ -32,10 +32,10 @@ logger.info(f"Using SageMaker Execution Role: {sagemaker_role}")
 bucket_name = f'sagemaker-{aws_region}-040571275415'
 base_s3_uri = f"s3://{bucket_name}/spacenet-building-detection"
 
-# Updated for unified S3 structure (all RGB images under raw_data/AOI_2_Vegas/PS-RGB)
-s3_train_images = f"{base_s3_uri}/raw_data/AOI_2_Vegas/PS-RGB"
+# Use preprocessed multispectral images and masks for training and validation
+s3_train_images = f"{base_s3_uri}/processed_masks/train/images"
 s3_train_masks = f"{base_s3_uri}/processed_masks/train/masks"
-s3_val_images = f"{base_s3_uri}/raw_data/AOI_2_Vegas/PS-RGB"  # Update if you have a separate val split
+s3_val_images = f"{base_s3_uri}/processed_masks/val/images"
 s3_val_masks = f"{base_s3_uri}/processed_masks/val/masks"
 
 # Important: Make sure these S3 paths exist and contain your data!
