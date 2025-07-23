@@ -2,8 +2,8 @@
 # ML/Deep Learning
 numpy
 pandas
-# torch
-# torchvision
+torch
+torchvision
 torch-geometric
 torch-scatter
 torch-sparse
