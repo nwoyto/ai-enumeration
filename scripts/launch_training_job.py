@@ -49,7 +49,7 @@ logger.info(f"  Validation Masks: {s3_val_masks}")
 # --- Hyperparameters for the training script ---
 hyperparameters = {
     'batch-size': 16,
-    'epochs': 100,
+    'epochs': 40,
     'learning-rate': 0.0001,
     'log-interval': 10,
     'num-workers': 4,
@@ -70,7 +70,7 @@ hyperparameters = {
 # --- Get the correct Docker image URI ---
 framework_version = '2.0.0' # Or the PyTorch version you are using
 py_version = 'py310' # Python version in the SageMaker container
-instance_type = 'ml.g4dn.xlarge' # G4 GPU instance for cost-effective debugging
+instance_type = 'ml.p3.2xlarge' # Smallest available P3 GPU instance
 
 training_image_uri = "040571275415.dkr.ecr.us-east-1.amazonaws.com/spacenet-geoprocessing:latest"
 logger.info(f"Using custom SageMaker training image: {training_image_uri}")

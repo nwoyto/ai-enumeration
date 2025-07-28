@@ -500,25 +500,721 @@
 
 # In code/train.py
 
+# import argparse
+# import sys
+# import subprocess
+# import os
+# import torch
+# import torch.nn as nn
+# import torch.optim as optim
+# from torch.utils.data import DataLoader
+# from torch.cuda.amp import autocast, GradScaler
+# import logging
+# import numpy as np
+# import matplotlib.pyplot as plt
+# import pandas as pd
+# from datetime import datetime
+# from tqdm import tqdm
+
+# # Import your custom modules
+# from model import HybridGeoNet
+# from dataset import SpaceNetBuildingDataset, calculate_stats # Import the calculator
+
+# # --- Logger Setup ---
+# logger = logging.getLogger(__name__)
+# logger.setLevel(logging.INFO)
+# logger.addHandler(logging.StreamHandler(sys.stdout))
+
+# # --- Loss & Metrics ---
+# class DiceLoss(nn.Module):
+#     def __init__(self, smooth=1e-6):
+#         super(DiceLoss, self).__init__()
+#         self.smooth = smooth
+
+#     def forward(self, pred, target):
+#         pred = torch.sigmoid(pred)
+#         pred = pred.contiguous().view(-1)
+#         target = target.contiguous().view(-1)
+#         intersection = (pred * target).sum()
+#         dice = (2. * intersection + self.smooth) / (pred.sum() + target.sum() + self.smooth)
+#         return 1 - dice
+
+# def calculate_iou(preds, targets, smooth=1e-6):
+#     preds = torch.sigmoid(preds) > 0.5
+#     targets = targets > 0.5
+#     intersection = (preds & targets).float().sum((1, 2, 3))
+#     union = (preds | targets).float().sum((1, 2, 3))
+#     iou = (intersection + smooth) / (union + smooth)
+#     return iou.mean()
+
+# # --- Main Training Function ---
+# def train(args):
+#     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#     logger.info(f"Using device: {device}")
+    
+#     # Calculate normalization stats from the downloaded training data
+#     mean, std = calculate_stats(args.train_images_dir, args.num_input_channels)
+#     logger.info(f"Calculated Mean: {mean}")
+#     logger.info(f"Calculated Std Dev: {std}")
+
+#     # Initialize datasets using local paths
+#     train_dataset = SpaceNetBuildingDataset(args.train_images_dir, args.train_masks_dir, 'train', args.num_input_channels, mean, std)
+#     val_dataset = SpaceNetBuildingDataset(args.val_images_dir, args.val_masks_dir, 'val', args.num_input_channels, mean, std)
+
+#     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
+#     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+
+#     # Initialize model, loss, and optimizer
+#     model = HybridGeoNet(
+#         cnn_model=args.cnn_model, num_input_channels=args.num_input_channels,
+#         vit_embed_dim=args.vit_embed_dim, vit_depth=args.vit_depth,
+#         vit_heads=args.vit_heads, gat_heads=args.gat_heads,
+#         num_classes=1, pretrained_cnn=args.pretrained_cnn
+#     ).to(device)
+
+#     criterion_bce = nn.BCEWithLogitsLoss()
+#     criterion_dice = DiceLoss()
+#     optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
+#     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=args.lr_scheduler_patience, verbose=True)
+#     scaler = GradScaler()
+    
+#     best_val_iou = 0.0
+
+#     # Training loop
+#     for epoch in range(args.epochs):
+#         model.train()
+#         train_loss = 0.0
+#         for images, masks in tqdm(train_loader, desc=f"Epoch {epoch+1}/{args.epochs} [Train]"):
+#             images, masks = images.to(device), masks.to(device)
+            
+#             optimizer.zero_grad()
+#             with autocast():
+#                 outputs = model(images)
+#                 loss = criterion_bce(outputs, masks) + criterion_dice(outputs, masks)
+            
+#             scaler.scale(loss).backward()
+#             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=args.gradient_clip_val)
+#             scaler.step(optimizer)
+#             scaler.update()
+            
+#             train_loss += loss.item()
+        
+#         avg_train_loss = train_loss / len(train_loader)
+#         logger.info(f"Epoch {epoch+1}: Avg Training Loss: {avg_train_loss:.4f}")
+
+#         # Validation loop
+#         model.eval()
+#         val_loss, val_iou = 0.0, 0.0
+#         with torch.no_grad():
+#             for images, masks in tqdm(val_loader, desc=f"Epoch {epoch+1}/{args.epochs} [Val]"):
+#                 images, masks = images.to(device), masks.to(device)
+#                 with autocast():
+#                     outputs = model(images)
+#                     loss = criterion_bce(outputs, masks) + criterion_dice(outputs, masks)
+#                 val_loss += loss.item()
+#                 val_iou += calculate_iou(outputs, masks).item()
+
+#         avg_val_loss = val_loss / len(val_loader)
+#         avg_val_iou = val_iou / len(val_loader)
+#         logger.info(f"Epoch {epoch+1}: Avg Validation Loss: {avg_val_loss:.4f}, Avg IoU: {avg_val_iou:.4f}")
+
+#         scheduler.step(avg_val_iou)
+
+#         # Save best model
+#         if avg_val_iou > best_val_iou:
+#             best_val_iou = avg_val_iou
+#             torch.save(model.state_dict(), os.path.join(args.model_dir, "best_model.pth"))
+#             logger.info(f"New best model saved with IoU: {best_val_iou:.4f}")
+
+#     # Save final model
+#     torch.save(model.state_dict(), os.path.join(args.model_dir, "final_model.pth"))
+#     logger.info("Training complete. Final model saved.")
+
+#     # --- Robust Output Saving: Real Training Outputs ---
+# import os
+# import pandas as pd
+# import matplotlib.pyplot as plt
+# from datetime import datetime
+
+# def train(args):
+#     # Initialize metrics lists and best-tracking variables
+#     train_losses = []
+#     val_losses = []
+#     val_ious = []
+#     val_dices = []
+#     best_val_iou = -1.0
+#     best_iou_epoch_num = -1
+#     # --- Robust Output Saving: Real Training Outputs ---
+#     output_artifacts_dir = os.path.join('/opt/ml/output', 'artifacts')
+#     images_dir = os.path.join(output_artifacts_dir, 'images')
+#     os.makedirs(images_dir, exist_ok=True)
+
+#     # === Collect metrics during training ===
+#     # These lists must be initialized at the top of train() and updated in the training loop:
+#     # train_losses, val_losses, val_ious, val_dices, best_val_iou, best_iou_epoch_num
+#     # (rest of your output-saving logic...)
+
+#     # We'll re-run the loop below to collect them if not already present
+
+#     # (If not already present, define these at the top of train):
+#     # train_losses, val_losses, val_ious, val_dices = [], [], [], []
+#     # best_val_iou = -1.0
+#     # best_iou_epoch_num = -1
+#     # metrics_table = []
+
+#     # Save metrics CSV (real values)
+#     metrics_table = []
+#     for epoch in range(args.epochs):
+#         metrics_table.append({
+#             'epoch': epoch+1,
+#             'train_loss': train_losses[epoch] if len(train_losses) > epoch else None,
+#             'val_loss': val_losses[epoch] if len(val_losses) > epoch else None,
+#             'val_iou': val_ious[epoch] if len(val_ious) > epoch else None,
+#             'val_dice': val_dices[epoch] if len(val_dices) > epoch else None,
+#         })
+#     metrics_df = pd.DataFrame(metrics_table)
+#     metrics_csv_path = os.path.join(output_artifacts_dir, 'metrics_per_epoch.csv')
+#     metrics_df.to_csv(metrics_csv_path, index=False)
+#     logger.info(f"Saved metrics CSV at {metrics_csv_path}")
+
+#     # Save loss curve (last epoch)
+#     plt.figure(figsize=(12, 6))
+#     plt.plot(range(1, len(train_losses)+1), train_losses, label='Train Loss', color='blue', linestyle='-')
+#     plt.plot(range(1, len(val_losses)+1), val_losses, label='Validation Loss', color='red', linestyle='--')
+#     plt.xlabel('Epoch', fontsize=12)
+#     plt.ylabel('Loss', fontsize=12)
+#     plt.title(f'Training & Validation Loss Over Epochs', fontsize=14)
+#     plt.legend(fontsize=10)
+#     plt.grid(True, linestyle=':', alpha=0.7)
+#     plt.tight_layout()
+#     plt.savefig(os.path.join(images_dir, f'loss_curve_epoch{args.epochs-1}.png'))
+#     plt.close()
+
+#     # Save metric curves (IoU & Dice)
+#     plt.figure(figsize=(12, 6))
+#     plt.plot(range(1, len(val_ious)+1), val_ious, label='Validation IoU', color='green', linestyle='-')
+#     plt.plot(range(1, len(val_dices)+1), val_dices, label='Validation Dice', color='purple', linestyle='--')
+#     if best_val_iou > -1.0:
+#         plt.scatter(best_iou_epoch_num, best_val_iou, color='darkgreen', marker='*', s=200, zorder=5, label=f'Best IoU: {best_val_iou:.4f}')
+#         plt.annotate(f'{best_val_iou:.4f}', (best_iou_epoch_num, best_val_iou), textcoords="offset points", xytext=(0,10), ha='center', fontsize=10, color='darkgreen')
+#     plt.xlabel('Epoch', fontsize=12)
+#     plt.ylabel('Metric Value', fontsize=12)
+#     plt.title(f'Validation Metrics (IoU & Dice) Over Epochs', fontsize=14)
+#     plt.legend(fontsize=10)
+#     plt.grid(True, linestyle=':', alpha=0.7)
+#     plt.ylim(0, 1.05)
+#     plt.tight_layout()
+#     plt.savefig(os.path.join(images_dir, f'metrics_curve_epoch{args.epochs-1}.png'))
+#     plt.close()
+
+#     # Save prediction overlays for last epoch (or best epoch)
+#     # Use a batch from val_loader
+#     model.eval()
+#     with torch.no_grad():
+#         val_data_iter = iter(val_loader)
+#         try:
+#             val_images, val_masks = next(val_data_iter)
+#         except StopIteration:
+#             val_loader_reset = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+#             val_images, val_masks = next(iter(val_loader_reset))
+#         val_images = val_images.to(device)
+#         with autocast():
+#             preds = model(val_images)
+#         preds = torch.sigmoid(preds)
+#         preds = (preds > 0.5).float()
+#         for i in range(min(args.num_vis_samples, val_images.shape[0])):
+#             fig, axs = plt.subplots(1, 4, figsize=(18, 4))
+#             img_np = val_images[i].detach().cpu().numpy()
+#             if img_np.shape[0] > 3:
+#                 img_np_display = np.transpose(img_np[:3], (1, 2, 0))
+#             else:
+#                 img_np_display = np.transpose(img_np, (1, 2, 0))
+#             img_np_display = np.clip(img_np_display, 0, 1)
+#             axs[0].imshow(img_np_display)
+#             axs[0].set_title('Input Image (RGB)', fontsize=12, wrap=True)
+#             gt_mask_np = val_masks[i][0].detach().cpu().numpy()
+#             axs[1].imshow(img_np_display, alpha=0.7)
+#             axs[1].imshow(gt_mask_np, cmap='spring', alpha=0.4, vmin=0, vmax=1)
+#             axs[1].set_title('GT Mask Overlay', fontsize=12, wrap=True)
+#             pred_mask_np = preds[i][0].detach().cpu().numpy()
+#             axs[2].imshow(img_np_display, alpha=0.7)
+#             axs[2].imshow(pred_mask_np, cmap='autumn', alpha=0.4, vmin=0, vmax=1)
+#             axs[2].set_title('Pred Mask Overlay', fontsize=12, wrap=True)
+#             axs[3].imshow(img_np_display, alpha=0.7)
+#             axs[3].imshow(gt_mask_np, cmap='spring', alpha=0.3, vmin=0, vmax=1)
+#             axs[3].imshow(pred_mask_np, cmap='autumn', alpha=0.3, vmin=0, vmax=1)
+#             axs[3].set_title(f'Overlay GT (green) & Pred (orange)\nSample {i}', fontsize=11, wrap=True)
+#             for ax in axs:
+#                 ax.axis('off')
+#             plt.tight_layout(rect=[0, 0, 1, 0.95])
+#             plt.subplots_adjust(top=0.85)
+#             fig.suptitle(f'Validation Visualization\nSample {i}', fontsize=14)
+#             plt.savefig(os.path.join(images_dir, f'val_pred_overlay_epoch{args.epochs-1}_sample{i}.png'), dpi=120)
+#             plt.close()
+
+#     # Save summary report
+#     summary_path = os.path.join(output_artifacts_dir, 'training_summary_report.md')
+#     with open(summary_path, 'w') as f:
+#         f.write(f"# Training Summary Report for Building Detector 🏗️\n\n")
+#         f.write(f"**Date:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+#         f.write(f"**Model:** HybridGeoNet\n")
+#         f.write(f"**Epochs:** {args.epochs}\n")
+#         f.write(f"**Batch Size:** {args.batch_size}\n")
+#         f.write(f"**Best Validation IoU:** {best_val_iou:.4f} (achieved at Epoch {best_iou_epoch_num})\n")
+#         f.write(f"**Input Channels:** {args.num_input_channels}\n\n")
+#         f.write("## Visualizations\n")
+#         f.write("Below are links to key plots and example predictions. All images are saved in the `images/` subdirectory of the output data path.\n\n")
+#         f.write(f"### 📈 Performance Curves\n")
+#         f.write(f"![Loss Curve](images/loss_curve_epoch{args.epochs-1}.png)\n")
+#         f.write(f"![Metrics Curve](images/metrics_curve_epoch{args.epochs-1}.png)\n\n")
+#         f.write(f"### 👁️‍🗨️ Example Building Detections (Last Epoch: {args.epochs})\n")
+#         for i in range(min(args.num_vis_samples, len(val_images))):
+#             f.write(f"#### Sample {i+1}\n")
+#             f.write(f"![Sample {i+1} Prediction Overlay](images/val_pred_overlay_epoch{args.epochs-1}_sample{i}.png)\n\n")
+#         f.write("\n---\n")
+#         f.write("## Summary Table of Epoch Metrics\n")
+#         f.write("| Epoch | Train Loss | Validation Loss | Validation IoU | Validation Dice |\n")
+#         f.write("| --- | --- | --- | --- | --- |\n")
+#         for row in metrics_table:
+#             f.write(f"| {row['epoch']} | {row['train_loss']:.4f} | {row['val_loss']:.4f} | {row['val_iou']:.4f} | {row['val_dice']:.4f} |\n")
+#     logger.info(f"Saved summary report at {summary_path}")
+
+# if __name__ == '__main__':
+#     parser = argparse.ArgumentParser()
+    
+#     # --- Data and Model Directories ---
+#     parser.add_argument('--train-images-dir', type=str, default=os.environ.get('SM_CHANNEL_TRAIN_IMAGES'))
+#     parser.add_argument('--train-masks-dir', type=str, default=os.environ.get('SM_CHANNEL_TRAIN_MASKS'))
+#     parser.add_argument('--val-images-dir', type=str, default=os.environ.get('SM_CHANNEL_VAL_IMAGES'))
+#     parser.add_argument('--val-masks-dir', type=str, default=os.environ.get('SM_CHANNEL_VAL_MASKS'))
+#     parser.add_argument('--model-dir', type=str, default=os.environ.get('SM_MODEL_DIR'))
+    
+#     # --- All Hyperparameters ---
+#     parser.add_argument('--batch-size', type=int, default=16)
+#     parser.add_argument('--epochs', type=int, default=40)
+#     parser.add_argument('--learning-rate', type=float, default=0.0001)
+#     parser.add_argument('--num-workers', type=int, default=4)
+#     parser.add_argument('--seed', type=int, default=42)
+#     parser.add_argument('--gradient-clip-val', type=float, default=1.0)
+#     parser.add_argument('--lr-scheduler-patience', type=int, default=5)
+#     parser.add_argument('--log-interval', type=int, default=10) # Used in more detailed logging
+#     parser.add_argument('--plot-interval', type=int, default=5) # For visualization
+#     parser.add_argument('--num-vis-samples', type=int, default=3) # For visualization
+
+#     # Model specific
+#     parser.add_argument('--num-input-channels', type=int, default=8)
+#     parser.add_argument('--cnn-model', type=str, default='resnet50')
+#     parser.add_argument('--pretrained-cnn', type=lambda x: (str(x).lower() == 'true'), default=True)
+#     parser.add_argument('--vit-embed-dim', type=int, default=768)
+#     parser.add_argument('--vit-depth', type=int, default=4)
+#     parser.add_argument('--vit-heads', type=int, default=12)
+#     parser.add_argument('--gat-heads', type=int, default=4)
+
+#     args = parser.parse_args()
+    
+#     train(args)
+
+###############
+# Gemini 2.0
+###############
+
+
+
+# # In code/train.py
+
+# import argparse
+# import os
+# import logging
+# import sys
+# import random
+# import numpy as np
+# from pathlib import Path
+# from tqdm import tqdm
+# import torch
+# import torch.nn as nn
+# import torch.optim as optim
+# from torch.utils.data import DataLoader
+# from torch.cuda.amp import autocast, GradScaler # Reverted to older import for compatibility
+# import rasterio
+
+# # Import your custom modules
+# from dataset import SpaceNetBuildingDataset, calculate_stats
+# from model import HybridGeoNet
+
+# # --- Logger Setup ---
+# logger = logging.getLogger(__name__)
+# logger.setLevel(logging.INFO)
+# logger.addHandler(logging.StreamHandler(sys.stdout))
+
+# # --- Loss & Metrics ---
+# class DiceLoss(nn.Module):
+#     def __init__(self, smooth=1e-6):
+#         super(DiceLoss, self).__init__()
+#         self.smooth = smooth
+
+#     def forward(self, pred, target):
+#         pred = torch.sigmoid(pred)
+#         pred, target = pred.contiguous().view(-1), target.contiguous().view(-1)
+#         intersection = (pred * target).sum()
+#         dice = (2. * intersection + self.smooth) / (pred.sum() + target.sum() + self.smooth)
+#         return 1 - dice
+
+# def calculate_metrics(preds, targets, smooth=1e-6):
+#     """Calculates both IoU and Dice score for a batch."""
+#     preds = torch.sigmoid(preds) > 0.5
+#     targets = targets > 0.5
+    
+#     # IoU calculation
+#     intersection = (preds & targets).float().sum((1, 2, 3))
+#     union = (preds | targets).float().sum((1, 2, 3))
+#     iou = (intersection + smooth) / (union + smooth)
+
+#     # Dice score calculation
+#     preds_flat = preds.contiguous().view(-1)
+#     targets_flat = targets.contiguous().view(-1)
+#     intersection_dice = (preds_flat * targets_flat).sum()
+#     dice_score = (2. * intersection_dice + smooth) / (preds_flat.sum() + targets_flat.sum() + smooth)
+    
+#     return iou.mean(), dice_score.mean()
+
+
+# # --- Main Training Function ---
+# def train(args):
+#     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#     logger.info(f"Using device: {device}")
+
+#     mean, std = calculate_stats(args.train_images_dir, args.num_input_channels)
+#     logger.info(f"Calculated Mean: {mean}")
+#     logger.info(f"Calculated Std Dev: {std}")
+
+#     train_dataset = SpaceNetBuildingDataset(args.train_images_dir, args.train_masks_dir, 'train', args.num_input_channels, mean, std)
+#     val_dataset = SpaceNetBuildingDataset(args.val_images_dir, args.val_masks_dir, 'val', args.num_input_channels, mean, std)
+
+#     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
+#     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+
+#     model = HybridGeoNet(
+#         cnn_model=args.cnn_model, num_input_channels=args.num_input_channels,
+#         vit_embed_dim=args.vit_embed_dim, vit_depth=args.vit_depth,
+#         vit_heads=args.vit_heads, gat_heads=args.gat_heads,
+#         num_classes=1, pretrained_cnn=args.pretrained_cnn
+#     ).to(device)
+
+#     criterion_bce = nn.BCEWithLogitsLoss()
+#     criterion_dice = DiceLoss()
+#     optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
+#     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=args.lr_scheduler_patience, verbose=True)
+#     scaler = GradScaler() # Corrected: Removed device_type argument
+    
+#     best_val_iou = 0.0
+
+#     for epoch in range(args.epochs):
+#         model.train()
+#         train_loss = 0.0
+#         for images, masks in tqdm(train_loader, desc=f"Epoch {epoch+1}/{args.epochs} [Train]"):
+#             images, masks = images.to(device), masks.to(device)
+#             optimizer.zero_grad(set_to_none=True)
+#             with autocast(): # Corrected: Removed device_type and dtype arguments
+#                 outputs = model(images)
+#                 loss = criterion_bce(outputs, masks) + criterion_dice(outputs, masks)
+#             scaler.scale(loss).backward()
+#             scaler.unscale_(optimizer)
+#             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=args.gradient_clip_val)
+#             scaler.step(optimizer)
+#             scaler.update()
+#             train_loss += loss.item()
+        
+#         avg_train_loss = train_loss / len(train_loader)
+#         logger.info(f"Epoch {epoch+1}: Avg Training Loss: {avg_train_loss:.4f}")
+
+#         model.eval()
+#         val_loss, val_iou, val_dice = 0.0, 0.0, 0.0
+#         with torch.no_grad():
+#             for images, masks in tqdm(val_loader, desc=f"Epoch {epoch+1}/{args.epochs} [Val]"):
+#                 images, masks = images.to(device), masks.to(device)
+#                 with autocast():
+#                     outputs = model(images)
+#                     loss = criterion_bce(outputs, masks) + criterion_dice(outputs, masks)
+#                 val_loss += loss.item()
+#                 iou, dice = calculate_metrics(outputs, masks)
+#                 val_iou += iou.item()
+#                 val_dice += dice.item()
+
+#         avg_val_loss = val_loss / len(val_loader)
+#         avg_val_iou = val_iou / len(val_loader)
+#         avg_val_dice = val_dice / len(val_loader)
+        
+#         logger.info(f"Epoch {epoch+1}: Avg Val Loss: {avg_val_loss:.4f}, IoU: {avg_val_iou:.4f}, Dice: {avg_val_dice:.4f}")
+#         print(f'sagemaker_metric: Validation_IoU={avg_val_iou:.6f}')
+        
+#         scheduler.step(avg_val_iou)
+
+#         if avg_val_iou > best_val_iou:
+#             best_val_iou = avg_val_iou
+#             torch.save(model.state_dict(), os.path.join(args.model_dir, "best_model.pth"))
+#             logger.info(f"New best model saved with IoU: {best_val_iou:.4f}")
+
+#     torch.save(model.state_dict(), os.path.join(args.model_dir, "final_model.pth"))
+#     logger.info("Training complete.")
+
+# if __name__ == '__main__':
+#     parser = argparse.ArgumentParser()
+    
+#     # SageMaker paths
+#     parser.add_argument('--train-images-dir', type=str, default=os.environ.get('SM_CHANNEL_TRAIN_IMAGES'))
+#     parser.add_argument('--train-masks-dir', type=str, default=os.environ.get('SM_CHANNEL_TRAIN_MASKS'))
+#     parser.add_argument('--val-images-dir', type=str, default=os.environ.get('SM_CHANNEL_VAL_IMAGES'))
+#     parser.add_argument('--val-masks-dir', type=str, default=os.environ.get('SM_CHANNEL_VAL_MASKS'))
+#     parser.add_argument('--model-dir', type=str, default=os.environ.get('SM_MODEL_DIR'))
+    
+#     # All hyperparameters
+#     parser.add_argument('--batch-size', type=int, default=16)
+#     parser.add_argument('--epochs', type=int, default=40)
+#     parser.add_argument('--learning-rate', type=float, default=0.0001)
+#     parser.add_argument('--num-workers', type=int, default=4)
+#     parser.add_argument('--seed', type=int, default=42)
+#     parser.add_argument('--gradient-clip-val', type=float, default=1.0)
+#     parser.add_argument('--lr-scheduler-patience', type=int, default=5)
+#     parser.add_argument('--log-interval', type=int, default=10)
+#     parser.add_argument('--plot-interval', type=int, default=5)
+#     parser.add_argument('--num-vis-samples', type=int, default=3)
+#     parser.add_argument('--num-input-channels', type=int, default=8)
+#     parser.add_argument('--cnn-model', type=str, default='resnet50')
+#     parser.add_argument('--pretrained-cnn', type=lambda x: (str(x).lower() == 'true'), default=True)
+#     parser.add_argument('--vit-embed-dim', type=int, default=768)
+#     parser.add_argument('--vit-depth', type=int, default=4)
+#     parser.add_argument('--vit-heads', type=int, default=12)
+#     parser.add_argument('--gat-heads', type=int, default=4)
+
+#     args, _ = parser.parse_known_args()
+    
+#     train(args)
+
+
+
+###############
+# Gemini 3.0
+###############
+
+
+
+
+
+
+
+# # In code/train.py
+
+# import argparse
+# import os
+# import logging
+# import sys
+# import random
+# import numpy as np
+# from pathlib import Path
+# from tqdm import tqdm
+# import torch
+# import torch.nn as nn
+# import torch.optim as optim
+# from torch.utils.data import DataLoader
+# from torch.cuda.amp import autocast, GradScaler
+# import rasterio
+# import matplotlib.pyplot as plt
+# import pandas as pd
+# from datetime import datetime
+
+# # Import your custom modules
+# from dataset import SpaceNetBuildingDataset, calculate_stats
+# from model import HybridGeoNet
+
+# # --- Logger Setup ---
+# logger = logging.getLogger(__name__)
+# logger.setLevel(logging.INFO)
+# logger.addHandler(logging.StreamHandler(sys.stdout))
+
+# # --- Loss & Metrics ---
+# class TverskyLoss(nn.Module):
+#     def __init__(self, alpha=0.3, beta=0.7, smooth=1e-6):
+#         super(TverskyLoss, self).__init__()
+#         self.alpha = alpha
+#         self.beta = beta
+#         self.smooth = smooth
+
+#     def forward(self, pred, target):
+#         pred = torch.sigmoid(pred)
+#         pred, target = pred.contiguous().view(-1), target.contiguous().view(-1)
+#         tp = (pred * target).sum()
+#         fn = (target * (1 - pred)).sum()
+#         fp = (pred * (1 - target)).sum()
+#         tversky_index = (tp + self.smooth) / (tp + self.alpha * fn + self.beta * fp + self.smooth)
+#         return 1 - tversky_index
+
+# def calculate_metrics(preds, targets, smooth=1e-6):
+#     preds = torch.sigmoid(preds) > 0.5
+#     targets = targets > 0.5
+#     intersection = (preds & targets).float().sum((1, 2, 3))
+#     union = (preds | targets).float().sum((1, 2, 3))
+#     iou = (intersection + smooth) / (union + smooth)
+#     dice_score = (2. * intersection + smooth) / (preds.float().sum((1, 2, 3)) + targets.float().sum((1, 2, 3)) + smooth)
+#     return iou.mean(), dice_score.mean()
+
+# # --- Main Training Function ---
+# def train(args):
+#     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#     logger.info(f"Using device: {device}")
+
+#     # --- Set random seeds ---
+#     torch.manual_seed(args.seed)
+#     np.random.seed(args.seed)
+#     random.seed(args.seed)
+
+#     # --- Data Loading ---
+#     mean, std = calculate_stats(args.train_images_dir, args.num_input_channels)
+#     logger.info(f"Calculated Stats -> Mean: {mean}, Std: {std}")
+
+#     train_dataset = SpaceNetBuildingDataset(args.train_images_dir, args.train_masks_dir, 'train', args.num_input_channels, mean, std)
+#     val_dataset = SpaceNetBuildingDataset(args.val_images_dir, args.val_masks_dir, 'val', args.num_input_channels, mean, std)
+
+#     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
+#     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+
+#     # --- Model Initialization (Corrected) ---
+#     model_hyperparams = {
+#         'num_input_channels': args.num_input_channels,
+#         'cnn_model': args.cnn_model,
+#         'pretrained_cnn': args.pretrained_cnn,
+#         'vit_embed_dim': args.vit_embed_dim,
+#         'vit_depth': args.vit_depth,
+#         'vit_heads': args.vit_heads,
+#         'gat_heads': args.gat_heads,
+#         'num_classes': 1
+#     }
+#     model = HybridGeoNet(**model_hyperparams).to(device)
+
+#     # --- Loss, Optimizer, Scaler ---
+#     criterion_bce = nn.BCEWithLogitsLoss()
+#     criterion_tversky = TverskyLoss(alpha=args.tversky_alpha, beta=args.tversky_beta)
+#     optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
+#     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=args.lr_scheduler_patience, verbose=True)
+#     scaler = GradScaler()
+    
+#     best_val_iou = 0.0
+
+#     # --- Training Loop ---
+#     for epoch in range(args.epochs):
+#         model.train()
+#         train_loss = 0.0
+#         for images, masks in tqdm(train_loader, desc=f"Epoch {epoch+1}/{args.epochs} [Train]"):
+#             images, masks = images.to(device), masks.to(device)
+#             optimizer.zero_grad(set_to_none=True)
+#             with autocast():
+#                 outputs = model(images)
+#                 loss = criterion_bce(outputs, masks) + criterion_tversky(outputs, masks)
+#             scaler.scale(loss).backward()
+#             scaler.unscale_(optimizer)
+#             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=args.gradient_clip_val)
+#             scaler.step(optimizer)
+#             scaler.update()
+#             train_loss += loss.item()
+        
+#         avg_train_loss = train_loss / len(train_loader)
+#         logger.info(f"Epoch {epoch+1}: Avg Training Loss: {avg_train_loss:.4f}")
+
+#         # --- Validation Loop ---
+#         model.eval()
+#         val_loss, val_iou = 0.0, 0.0
+#         with torch.no_grad():
+#             for images, masks in tqdm(val_loader, desc=f"Epoch {epoch+1}/{args.epochs} [Val]"):
+#                 images, masks = images.to(device), masks.to(device)
+#                 with autocast():
+#                     outputs = model(images)
+#                     loss = criterion_bce(outputs, masks) + criterion_tversky(outputs, masks)
+#                 val_loss += loss.item()
+#                 iou, _ = calculate_metrics(outputs, masks)
+#                 val_iou += iou.item()
+
+#         avg_val_loss = val_loss / len(val_loader)
+#         avg_val_iou = val_iou / len(val_loader)
+        
+#         logger.info(f"Epoch {epoch+1}: Avg Val Loss: {avg_val_loss:.4f}, IoU: {avg_val_iou:.4f}")
+#         print(f'sagemaker_metric: Validation_IoU={avg_val_iou:.6f}')
+        
+#         scheduler.step(avg_val_iou)
+
+#         if avg_val_iou > best_val_iou:
+#             best_val_iou = avg_val_iou
+#             torch.save(model.state_dict(), os.path.join(args.model_dir, "best_model.pth"))
+#             logger.info(f"New best model saved with IoU: {best_val_iou:.4f}")
+
+#     torch.save(model.state_dict(), os.path.join(args.model_dir, "final_model.pth"))
+#     logger.info("Training complete.")
+
+# if __name__ == '__main__':
+#     parser = argparse.ArgumentParser()
+    
+#     # SageMaker paths
+#     parser.add_argument('--train-images-dir', type=str, default=os.environ.get('SM_CHANNEL_TRAIN_IMAGES'))
+#     parser.add_argument('--train-masks-dir', type=str, default=os.environ.get('SM_CHANNEL_TRAIN_MASKS'))
+#     parser.add_argument('--val-images-dir', type=str, default=os.environ.get('SM_CHANNEL_VAL_IMAGES'))
+#     parser.add_argument('--val-masks-dir', type=str, default=os.environ.get('SM_CHANNEL_VAL_MASKS'))
+#     parser.add_argument('--model-dir', type=str, default=os.environ.get('SM_MODEL_DIR'))
+    
+#     # Hyperparameters
+#     parser.add_argument('--batch-size', type=int, default=16)
+#     parser.add_argument('--epochs', type=int, default=40)
+#     parser.add_argument('--learning-rate', type=float, default=0.0001)
+#     parser.add_argument('--num-workers', type=int, default=4)
+#     parser.add_argument('--seed', type=int, default=42)
+#     parser.add_argument('--gradient-clip-val', type=float, default=1.0)
+#     parser.add_argument('--lr-scheduler-patience', type=int, default=5)
+#     parser.add_argument('--tversky-alpha', type=float, default=0.3)
+#     parser.add_argument('--tversky-beta', type=float, default=0.7)
+    
+#     # Model specific
+#     parser.add_argument('--num-input-channels', type=int, default=8)
+#     parser.add_argument('--cnn-model', type=str, default='resnet50')
+#     parser.add_argument('--pretrained-cnn', type=lambda x: (str(x).lower() == 'true'), default=True)
+#     parser.add_argument('--vit-embed-dim', type=int, default=768)
+#     parser.add_argument('--vit-depth', type=int, default=4)
+#     parser.add_argument('--vit-heads', type=int, default=12)
+#     parser.add_argument('--gat-heads', type=int, default=4)
+    
+#     args, _ = parser.parse_known_args()
+    
+#     train(args)
+
+
+
+
+
+
+
+
+
+
+
+# In code/train.py
+
 import argparse
-import sys
-import subprocess
 import os
+import logging
+import sys
+import random
+import numpy as np
+from pathlib import Path
+from tqdm import tqdm
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torch.cuda.amp import autocast, GradScaler
-import logging
-import numpy as np
+import rasterio
 import matplotlib.pyplot as plt
 import pandas as pd
 from datetime import datetime
-from tqdm import tqdm
 
 # Import your custom modules
+from dataset import SpaceNetBuildingDataset, calculate_stats
 from model import HybridGeoNet
-from dataset import SpaceNetBuildingDataset, calculate_stats # Import the calculator
 
 # --- Logger Setup ---
 logger = logging.getLogger(__name__)
@@ -526,132 +1222,218 @@ logger.setLevel(logging.INFO)
 logger.addHandler(logging.StreamHandler(sys.stdout))
 
 # --- Loss & Metrics ---
-class DiceLoss(nn.Module):
-    def __init__(self, smooth=1e-6):
-        super(DiceLoss, self).__init__()
+class TverskyLoss(nn.Module):
+    def __init__(self, alpha=0.3, beta=0.7, smooth=1e-6):
+        super(TverskyLoss, self).__init__()
+        self.alpha = alpha
+        self.beta = beta
         self.smooth = smooth
 
     def forward(self, pred, target):
         pred = torch.sigmoid(pred)
-        pred = pred.contiguous().view(-1)
-        target = target.contiguous().view(-1)
-        intersection = (pred * target).sum()
-        dice = (2. * intersection + self.smooth) / (pred.sum() + target.sum() + self.smooth)
-        return 1 - dice
+        pred, target = pred.contiguous().view(-1), target.contiguous().view(-1)
+        tp = (pred * target).sum()
+        fn = (target * (1 - pred)).sum()
+        fp = (pred * (1 - target)).sum()
+        tversky_index = (tp + self.smooth) / (tp + self.alpha * fn + self.beta * fp + self.smooth)
+        return 1 - tversky_index
 
-def calculate_iou(preds, targets, smooth=1e-6):
+def calculate_metrics(preds, targets, smooth=1e-6):
     preds = torch.sigmoid(preds) > 0.5
     targets = targets > 0.5
     intersection = (preds & targets).float().sum((1, 2, 3))
     union = (preds | targets).float().sum((1, 2, 3))
     iou = (intersection + smooth) / (union + smooth)
-    return iou.mean()
+    dice_score = (2. * intersection + smooth) / (preds.float().sum((1, 2, 3)) + targets.float().sum((1, 2, 3)) + smooth)
+    return iou.mean(), dice_score.mean()
+
+def save_mask_images(images, true_masks, pred_masks, output_dir, epoch, num_images=4):
+    """Saves a grid of original images, true masks, and predicted masks."""
+    output_dir = Path(output_dir) / "predicted_masks"
+    output_dir.mkdir(exist_ok=True)
+    
+    # Ensure we don't try to save more images than are in the batch
+    num_images = min(num_images, images.shape[0])
+
+    fig, axes = plt.subplots(num_images, 3, figsize=(15, 5 * num_images))
+    fig.suptitle(f"Epoch {epoch+1} Predictions", fontsize=16)
+
+    # Denormalize image for visualization if necessary (assuming it's just a single channel for plotting)
+    # This part may need adjustment based on your specific normalization and number of channels
+    images_to_plot = images.cpu().numpy()
+    true_masks_to_plot = true_masks.cpu().numpy().squeeze(1)
+    pred_masks_to_plot = (torch.sigmoid(pred_masks).cpu().numpy() > 0.5).squeeze(1)
+
+    for i in range(num_images):
+        # Plot original image (displaying the first channel)
+        ax = axes[i, 0]
+        ax.imshow(images_to_plot[i][0], cmap='gray')
+        ax.set_title(f"Image {i+1}")
+        ax.axis('off')
+
+        # Plot true mask
+        ax = axes[i, 1]
+        ax.imshow(true_masks_to_plot[i], cmap='gray')
+        ax.set_title(f"True Mask {i+1}")
+        ax.axis('off')
+
+        # Plot predicted mask
+        ax = axes[i, 2]
+        ax.imshow(pred_masks_to_plot[i], cmap='gray')
+        ax.set_title(f"Predicted Mask {i+1}")
+        ax.axis('off')
+
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    plt.savefig(output_dir / f"epoch_{epoch+1}_predictions.png")
+    plt.close()
+
 
 # --- Main Training Function ---
 def train(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Using device: {device}")
-    
-    # Calculate normalization stats from the downloaded training data
-    mean, std = calculate_stats(args.train_images_dir, args.num_input_channels)
-    logger.info(f"Calculated Mean: {mean}")
-    logger.info(f"Calculated Std Dev: {std}")
 
-    # Initialize datasets using local paths
+    # --- Set random seeds ---
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
+    random.seed(args.seed)
+
+    # --- Data Loading ---
+    mean, std = calculate_stats(args.train_images_dir, args.num_input_channels)
+    logger.info(f"Calculated Stats -> Mean: {mean}, Std: {std}")
+
     train_dataset = SpaceNetBuildingDataset(args.train_images_dir, args.train_masks_dir, 'train', args.num_input_channels, mean, std)
     val_dataset = SpaceNetBuildingDataset(args.val_images_dir, args.val_masks_dir, 'val', args.num_input_channels, mean, std)
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
-    # Initialize model, loss, and optimizer
-    model = HybridGeoNet(
-        cnn_model=args.cnn_model, num_input_channels=args.num_input_channels,
-        vit_embed_dim=args.vit_embed_dim, vit_depth=args.vit_depth,
-        vit_heads=args.vit_heads, gat_heads=args.gat_heads,
-        num_classes=1, pretrained_cnn=args.pretrained_cnn
-    ).to(device)
+    # --- Model Initialization ---
+    model_hyperparams = {
+        'num_input_channels': args.num_input_channels,
+        'cnn_model': args.cnn_model,
+        'pretrained_cnn': args.pretrained_cnn,
+        'vit_embed_dim': args.vit_embed_dim,
+        'vit_depth': args.vit_depth,
+        'vit_heads': args.vit_heads,
+        'gat_heads': args.gat_heads,
+        'num_classes': 1
+    }
+    model = HybridGeoNet(**model_hyperparams).to(device)
 
+    # --- Loss, Optimizer, Scaler ---
     criterion_bce = nn.BCEWithLogitsLoss()
-    criterion_dice = DiceLoss()
+    criterion_tversky = TverskyLoss(alpha=args.tversky_alpha, beta=args.tversky_beta)
     optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=args.lr_scheduler_patience, verbose=True)
     scaler = GradScaler()
     
     best_val_iou = 0.0
+    
+    # --- History Tracking ---
+    history = {
+        'train_loss': [],
+        'val_loss': [],
+        'val_iou': []
+    }
 
-    # Training loop
+    # --- Training Loop ---
     for epoch in range(args.epochs):
         model.train()
         train_loss = 0.0
         for images, masks in tqdm(train_loader, desc=f"Epoch {epoch+1}/{args.epochs} [Train]"):
             images, masks = images.to(device), masks.to(device)
-            
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
             with autocast():
                 outputs = model(images)
-                loss = criterion_bce(outputs, masks) + criterion_dice(outputs, masks)
-            
+                loss = criterion_bce(outputs, masks) + criterion_tversky(outputs, masks)
             scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=args.gradient_clip_val)
             scaler.step(optimizer)
             scaler.update()
-            
             train_loss += loss.item()
         
         avg_train_loss = train_loss / len(train_loader)
+        history['train_loss'].append(avg_train_loss)
         logger.info(f"Epoch {epoch+1}: Avg Training Loss: {avg_train_loss:.4f}")
 
-        # Validation loop
+        # --- Validation Loop ---
         model.eval()
         val_loss, val_iou = 0.0, 0.0
         with torch.no_grad():
-            for images, masks in tqdm(val_loader, desc=f"Epoch {epoch+1}/{args.epochs} [Val]"):
+            for i, (images, masks) in enumerate(tqdm(val_loader, desc=f"Epoch {epoch+1}/{args.epochs} [Val]")):
                 images, masks = images.to(device), masks.to(device)
                 with autocast():
                     outputs = model(images)
-                    loss = criterion_bce(outputs, masks) + criterion_dice(outputs, masks)
+                    loss = criterion_bce(outputs, masks) + criterion_tversky(outputs, masks)
                 val_loss += loss.item()
-                val_iou += calculate_iou(outputs, masks).item()
+                iou, _ = calculate_metrics(outputs, masks)
+                val_iou += iou.item()
+                
+                # Save mask images on the first batch of the last epoch
+                if epoch == args.epochs - 1 and i == 0:
+                    logger.info("Saving predicted mask images...")
+                    save_mask_images(images.cpu(), masks.cpu(), outputs.cpu(), args.output_dir, epoch)
 
         avg_val_loss = val_loss / len(val_loader)
         avg_val_iou = val_iou / len(val_loader)
-        logger.info(f"Epoch {epoch+1}: Avg Validation Loss: {avg_val_loss:.4f}, Avg IoU: {avg_val_iou:.4f}")
-
+        history['val_loss'].append(avg_val_loss)
+        history['val_iou'].append(avg_val_iou)
+        
+        logger.info(f"Epoch {epoch+1}: Avg Val Loss: {avg_val_loss:.4f}, IoU: {avg_val_iou:.4f}")
+        print(f'sagemaker_metric: Validation_IoU={avg_val_iou:.6f}')
+        
         scheduler.step(avg_val_iou)
 
-        # Save best model
         if avg_val_iou > best_val_iou:
             best_val_iou = avg_val_iou
             torch.save(model.state_dict(), os.path.join(args.model_dir, "best_model.pth"))
             logger.info(f"New best model saved with IoU: {best_val_iou:.4f}")
 
-    # Save final model
     torch.save(model.state_dict(), os.path.join(args.model_dir, "final_model.pth"))
-    logger.info("Training complete. Final model saved.")
+    logger.info("Training complete.")
+
+    # --- Save Training Summary and Plots ---
+    logger.info(f"Saving training summary and plots to {args.output_dir}")
+    
+    # Save metrics to CSV
+    df = pd.DataFrame(history)
+    df.to_csv(os.path.join(args.output_dir, "training_summary.csv"), index_label="Epoch")
+
+    # Save loss curve plot
+    plt.figure(figsize=(10, 5))
+    plt.plot(history['train_loss'], label='Training Loss')
+    plt.plot(history['val_loss'], label='Validation Loss')
+    plt.title('Training and Validation Loss')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.savefig(os.path.join(args.output_dir, 'loss_curve.png'))
+    plt.close()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     
-    # --- Data and Model Directories ---
+    # SageMaker paths
     parser.add_argument('--train-images-dir', type=str, default=os.environ.get('SM_CHANNEL_TRAIN_IMAGES'))
     parser.add_argument('--train-masks-dir', type=str, default=os.environ.get('SM_CHANNEL_TRAIN_MASKS'))
     parser.add_argument('--val-images-dir', type=str, default=os.environ.get('SM_CHANNEL_VAL_IMAGES'))
     parser.add_argument('--val-masks-dir', type=str, default=os.environ.get('SM_CHANNEL_VAL_MASKS'))
     parser.add_argument('--model-dir', type=str, default=os.environ.get('SM_MODEL_DIR'))
+    parser.add_argument('--output-dir', type=str, default=os.environ.get('SM_OUTPUT_DATA_DIR', './output'))
     
-    # --- All Hyperparameters ---
+    # Hyperparameters
     parser.add_argument('--batch-size', type=int, default=16)
-    parser.add_argument('--epochs', type=int, default=100)
+    parser.add_argument('--epochs', type=int, default=40)
     parser.add_argument('--learning-rate', type=float, default=0.0001)
-    parser.add_argument('--num-workers', type=int, default=4)
+    parser.add_.add_argument('--num-workers', type=int, default=4)
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--gradient-clip-val', type=float, default=1.0)
     parser.add_argument('--lr-scheduler-patience', type=int, default=5)
-    parser.add_argument('--log-interval', type=int, default=10) # Used in more detailed logging
-    parser.add_argument('--plot-interval', type=int, default=5) # For visualization
-    parser.add_argument('--num-vis-samples', type=int, default=3) # For visualization
-
+    parser.add_argument('--tversky-alpha', type=float, default=0.3)
+    parser.add_argument('--tversky-beta', type=float, default=0.7)
+    
     # Model specific
     parser.add_argument('--num-input-channels', type=int, default=8)
     parser.add_argument('--cnn-model', type=str, default='resnet50')
@@ -660,7 +1442,10 @@ if __name__ == '__main__':
     parser.add_argument('--vit-depth', type=int, default=4)
     parser.add_argument('--vit-heads', type=int, default=12)
     parser.add_argument('--gat-heads', type=int, default=4)
-
-    args = parser.parse_args()
+    
+    args, _ = parser.parse_known_args()
+    
+    # Create output directory if it doesn't exist
+    Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     
     train(args)
