@@ -35,8 +35,8 @@ spacenet-building-detection/
 │               └── masks/
 ├── scripts/
 │   ├── preprocess_data.py
-│   └── (Optional) deploy_endpoint.py
+│   └── deploy_endpoint.py
 └── README.md
 ```
 
-See subdirectories for specific code, data, and scripts.
+
