@@ -1,0 +1,2 @@
+# Ignore info folder with local S3/output listings and logs
+info/
