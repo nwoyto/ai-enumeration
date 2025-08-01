@@ -1427,7 +1427,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch-size', type=int, default=16)
     parser.add_argument('--epochs', type=int, default=40)
     parser.add_argument('--learning-rate', type=float, default=0.0001)
-    parser.add_.add_argument('--num-workers', type=int, default=4)
+    parser.add_argument('--num-workers', type=int, default=4)
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--gradient-clip-val', type=float, default=1.0)
     parser.add_argument('--lr-scheduler-patience', type=int, default=5)
