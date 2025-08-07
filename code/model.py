@@ -152,7 +152,7 @@ class HybridViTGATBlock(nn.Module):
     Graph Attention Network (GAT) for enhanced global and local reasoning.
     It processes the highest-level CNN features (x5).
     """
-    def __init__(self, in_channels, embed_dim, num_heads, gat_heads, dropout=0.1):
+    def __init__(self, in_channels, embed_dim, num_heads, gat_heads, dropout=0.2):
         super().__init__()
         # Layer normalization for the input features from CNN.
         # It expects `in_channels` features (e.g., 2048 from ResNet's layer4).
@@ -162,7 +162,8 @@ class HybridViTGATBlock(nn.Module):
 
         # Multi-head Self-Attention, similar to ViT's attention mechanism.
         # `embed_dim` is the dimension of the input and output features for attention.
-        self.attn = nn.MultiheadAttention(embed_dim, num_heads, dropout=dropout, batch_first=True)
+        # Double the number of attention heads for more capacity
+        self.attn = nn.MultiheadAttention(embed_dim, num_heads * 2, dropout=dropout, batch_first=True)
         
         # Layer normalization before processing for GAT.
         self.norm2 = nn.LayerNorm(embed_dim)
@@ -173,7 +174,8 @@ class HybridViTGATBlock(nn.Module):
         # Input: `embed_dim` (768)
         # Output per head: `embed_dim // gat_heads` (768 // 4 = 192)
         # Since `concat=True`, the total output dimension is `(embed_dim // gat_heads) * gat_heads = 192 * 4 = 768`.
-        self.gat_conv1 = GATConv(embed_dim, embed_dim // gat_heads, heads=gat_heads, dropout=dropout, concat=True)
+        # Double the number of GAT heads for more capacity
+        self.gat_conv1 = GATConv(embed_dim, embed_dim // (gat_heads * 2), heads=gat_heads * 2, dropout=dropout, concat=True)
         
         # --- CRITICAL FIX APPLIED HERE ---
         # This linear layer projects the output of the first GATConv layer back to `embed_dim`.
@@ -186,29 +188,34 @@ class HybridViTGATBlock(nn.Module):
         # Input: `embed_dim` (768), coming from `proj_gat1_to_embed_dim`.
         # Output per head: `embed_dim // gat_heads` (192)
         # Since `concat=False`, the output dimension is just `out_channels`, which is `embed_dim // gat_heads = 192`.
-        self.gat_conv2 = GATConv(embed_dim, embed_dim // gat_heads, heads=1, concat=False, dropout=dropout)
+        self.gat_conv2 = GATConv(embed_dim, embed_dim // (gat_heads * 2), heads=1, concat=False, dropout=dropout)
         
         self.dropout = nn.Dropout(dropout)
 
         # Linear layer to project `x_after_attn_residual` (which is `embed_dim`)
-        # to match the final GAT output dimension (`embed_dim // gat_heads = 192`) for residual connection.
-        self.residual_proj = nn.Linear(embed_dim, embed_dim // gat_heads)
+        # to match the final GAT output dimension (now `embed_dim // (gat_heads * 2)`) for residual connection.
+        self.residual_proj = nn.Linear(embed_dim, embed_dim // (gat_heads * 2))
 
         # Normalization after the GAT output and residual connection.
-        # This norm expects input of `embed_dim // gat_heads` (192).
-        self.norm3 = nn.LayerNorm(embed_dim // gat_heads) 
+        self.norm3 = nn.LayerNorm(embed_dim // (gat_heads * 2))
 
-        # MLP (Feed-Forward Network) after GAT and residual.
-        # It operates on features of dimension `embed_dim // gat_heads` (192).
+        # Deepened MLP (Feed-Forward Network) after GAT and residual.
+        # It operates on features of dimension `embed_dim // (gat_heads * 2)`.
         self.mlp = nn.Sequential(
-            nn.Linear(embed_dim // gat_heads, embed_dim // gat_heads),
-            nn.GELU(), # GELU activation is commonly used in Transformers.
+            nn.Linear(embed_dim // (gat_heads * 2), embed_dim // (gat_heads * 2)),
+            nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(embed_dim // gat_heads, embed_dim // gat_heads),
+            nn.Linear(embed_dim // (gat_heads * 2), embed_dim // (gat_heads * 2) * 2),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(embed_dim // (gat_heads * 2) * 2, embed_dim // (gat_heads * 2)),
             nn.Dropout(dropout)
         )
         # Final layer normalization.
-        self.final_norm = nn.LayerNorm(embed_dim // gat_heads)
+        self.final_norm = nn.LayerNorm(embed_dim // (gat_heads * 2))
+
+        # Projection to match decoder input channels (192 expected)
+        self.decoder_proj = nn.Linear(embed_dim // (gat_heads * 2), 192)
 
 
     def forward(self, x_cnn_feat):
@@ -336,6 +343,8 @@ class DecoderBlock(nn.Module):
 
 
 class HybridGeoNet(nn.Module):
+    # NOTE: Always initialize pre_decoder_proj in __init__ to avoid AttributeError.
+
     """
     The main hybrid model architecture for building detection/segmentation.
     It combines:
@@ -349,6 +358,7 @@ class HybridGeoNet(nn.Module):
                  vit_embed_dim=768, vit_depth=4, vit_heads=12, gat_heads=4):
         super().__init__()
         self.num_classes = num_classes
+        self.pre_decoder_proj = None  # Ensure projection attribute always exists
 
         # CNN Encoder: Extracts multi-scale features.
         self.cnn_encoder = CNNEncoder(cnn_model, num_input_channels, pretrained_cnn)
@@ -404,7 +414,24 @@ class HybridGeoNet(nn.Module):
         x2, x3, x4, x5 = self.cnn_encoder(x)
 
         # ---------- ViT‑GAT ----------
-        x = self.hybrid_vit_gat_block(x5)          # [B,192,H/32,W/32]
+        x = self.hybrid_vit_gat_block(x5)          # [B,192,H/32,W/32] or [B,96,H/32,W/32] (actual)
+
+        # --- Channel Mismatch Fix ---
+        # IMPORTANT: The decoder expects input with 192 channels here (first_decoder_conv expects 192 in-channels),
+        # but the output of the encoder/ViT-GAT block may change depending on model complexity, number of heads, or MLP width.
+        # If you change the ViT-GAT block's output channels (e.g., by altering number of GAT heads, embed_dim, or MLP structure),
+        # you MUST ensure the output here matches the decoder's expected input channels.
+        # This 1x1 Conv2d projects the encoder output to 192 channels if needed, preventing runtime errors.
+        #
+        # WHEN FINE-TUNING: Always check the shape here after any architectural change upstream!
+        # If you see a RuntimeError about channel mismatch ("expected input[..., 192, ...], but got ..."),
+        # this is the place to fix it. Adjust this projection or update the decoder as needed.
+        if x.shape[1] != 192:
+            # Persistent projection layer: Used only if the ViT-GAT output channels do not match decoder's expected channels (192)
+            if self.pre_decoder_proj is None or self.pre_decoder_proj.in_channels != x.shape[1]:
+                self.pre_decoder_proj = nn.Conv2d(x.shape[1], 192, kernel_size=1).to(x.device)
+            x = self.pre_decoder_proj(x)
+            print(f"[Fix] Projected encoder output to 192 channels: {x.shape}")
 
         # ---------- Decoder ----------
         x = self.first_decoder_conv(x)             # [B,512,H/32,W/32]

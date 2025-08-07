@@ -300,8 +300,8 @@
 #             scaler.update()               # Update scaler for next iteration
 #             running_loss += loss.item()
 
-#             if batch_idx % args.log_interval == 0:
-#                 logger.info(f"Train Epoch: {epoch} [{batch_idx * args.batch_size}/{len(train_loader.dataset)} ({100. * batch_idx / len(train_loader):.0f}%)] Loss: {loss.item():.6f}")
+#             if batch_idx % TRAINING_CONFIG.get("log_interval", 10) == 0:
+#                 logger.info(f"Train Epoch: {epoch} [{batch_idx * train_loader.batch_size}/{len(train_loader.dataset)} ({100. * batch_idx / len(train_loader):.0f}%)] Loss: {loss.item():.6f}")
         
 #         avg_train_loss = running_loss / len(train_loader)
 #         train_losses.append(avg_train_loss)
@@ -1334,7 +1334,8 @@ def train(args):
     history = {
         'train_loss': [],
         'val_loss': [],
-        'val_iou': []
+        'val_iou': [],
+        'val_dice': []
     }
 
     # --- Training Loop ---
@@ -1360,7 +1361,7 @@ def train(args):
 
         # --- Validation Loop ---
         model.eval()
-        val_loss, val_iou = 0.0, 0.0
+        val_loss, val_iou, val_dice = 0.0, 0.0, 0.0
         with torch.no_grad():
             for i, (images, masks) in enumerate(tqdm(val_loader, desc=f"Epoch {epoch+1}/{args.epochs} [Val]")):
                 images, masks = images.to(device), masks.to(device)
@@ -1368,8 +1369,9 @@ def train(args):
                     outputs = model(images)
                     loss = criterion_bce(outputs, masks) + criterion_tversky(outputs, masks)
                 val_loss += loss.item()
-                iou, _ = calculate_metrics(outputs, masks)
+                iou, dice = calculate_metrics(outputs, masks)
                 val_iou += iou.item()
+                val_dice += dice.item()
                 
                 # Save mask images on the first batch of the last epoch
                 if epoch == args.epochs - 1 and i == 0:
@@ -1378,8 +1380,10 @@ def train(args):
 
         avg_val_loss = val_loss / len(val_loader)
         avg_val_iou = val_iou / len(val_loader)
+        avg_val_dice = val_dice / len(val_loader)
         history['val_loss'].append(avg_val_loss)
         history['val_iou'].append(avg_val_iou)
+        history['val_dice'].append(avg_val_dice)
         
         logger.info(f"Epoch {epoch+1}: Avg Val Loss: {avg_val_loss:.4f}, IoU: {avg_val_iou:.4f}")
         print(f'sagemaker_metric: Validation_IoU={avg_val_iou:.6f}')
@@ -1405,11 +1409,24 @@ def train(args):
     plt.figure(figsize=(10, 5))
     plt.plot(history['train_loss'], label='Training Loss')
     plt.plot(history['val_loss'], label='Validation Loss')
-    plt.title('Training and Validation Loss')
-    plt.xlabel('Epochs')
+    plt.xlabel('Epoch')
     plt.ylabel('Loss')
+    plt.title('Training and Validation Loss')
     plt.legend()
-    plt.savefig(os.path.join(args.output_dir, 'loss_curve.png'))
+    plt.tight_layout()
+    plt.savefig(os.path.join(args.output_dir, "loss_curve.png"))
+    plt.close()
+
+    # Save IoU and Dice curve plot
+    plt.figure(figsize=(10, 5))
+    plt.plot(history['val_iou'], label='Validation IoU')
+    plt.plot(history['val_dice'], label='Validation Dice')
+    plt.xlabel('Epoch')
+    plt.ylabel('Score')
+    plt.title('Validation IoU and Dice per Epoch')
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(args.output_dir, "metrics_curve.png"))
     plt.close()
 
 if __name__ == '__main__':
